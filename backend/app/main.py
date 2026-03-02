@@ -35,6 +35,17 @@ app.include_router(characters_router)
 app.include_router(relationships_router)
 app.include_router(llm_router)
 
+from app.api.chapters import router as chapters_router, fs_router as foreshadowings_router
+from app.api.writing import router as writing_router
+
+app.include_router(chapters_router)
+app.include_router(foreshadowings_router)
+app.include_router(writing_router)
+
+from app.api.export import router as export_router
+
+app.include_router(export_router)
+
 
 @app.get("/health")
 async def health():
