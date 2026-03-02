@@ -26,6 +26,16 @@ app.add_middleware(
 )
 
 
+from app.api.novels import router as novels_router
+from app.api.characters import router as characters_router, rel_router as relationships_router
+from app.api.llm_api import router as llm_router
+
+app.include_router(novels_router)
+app.include_router(characters_router)
+app.include_router(relationships_router)
+app.include_router(llm_router)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
