@@ -18,7 +18,7 @@ class Novel(Base):
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     highlights: Mapped[str | None] = mapped_column(Text, nullable=True)
-    world_setting: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    world_setting: Mapped[str | None] = mapped_column(Text, nullable=True)
     core_conflict: Mapped[str | None] = mapped_column(Text, nullable=True)
     protagonist_identity: Mapped[str | None] = mapped_column(Text, nullable=True)
     golden_finger: Mapped[str | None] = mapped_column(Text, nullable=True)

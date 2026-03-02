@@ -7,6 +7,15 @@ class NovelCreate(BaseModel):
     author_name: str
     genre: str
     mode: str
+    world_setting: str | None = None
+    protagonist_identity: str | None = None
+    core_conflict: str | None = None
+    golden_finger: str | None = None
+    antagonist_setting: str | None = None
+    power_system: str | None = None
+    core_suspense: str | None = None
+    story_stage: str | None = None
+    style_tone: str | None = None
     target_chapters: int | None = None
     selected_style_id: int | None = None
     selected_blueprint_id: int | None = None
@@ -20,7 +29,7 @@ class NovelUpdate(BaseModel):
     cover_url: str | None = None
     synopsis: str | None = None
     highlights: str | None = None
-    world_setting: dict | None = None
+    world_setting: str | None = None
     core_conflict: str | None = None
     protagonist_identity: str | None = None
     golden_finger: str | None = None
@@ -44,7 +53,7 @@ class NovelResponse(BaseModel):
     cover_url: str | None = None
     synopsis: str | None = None
     highlights: str | None = None
-    world_setting: dict | None = None
+    world_setting: str | None = None
     core_conflict: str | None = None
     protagonist_identity: str | None = None
     golden_finger: str | None = None
@@ -85,7 +94,7 @@ class IdeaRequest(BaseModel):
 
 
 class IdeaResponse(BaseModel):
-    world_setting: dict
+    world_setting: str
     protagonist_identity: str
     core_conflict: str
     golden_finger: str
