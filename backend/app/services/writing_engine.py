@@ -440,8 +440,20 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
     char_names = [c.name for c in characters]
     char_map = {c.name: c for c in characters}
 
+    # 获取活跃伏笔列表
+    fs_result = await db.execute(
+        select(Foreshadowing).where(
+            Foreshadowing.novel_id == chapter.novel_id,
+            Foreshadowing.status.in_(["埋设", "推进中"]),
+        )
+    )
+    active_foreshadowings = [
+        {"id": f.id, "description": f.description}
+        for f in fs_result.scalars().all()
+    ]
+
     provider = get_provider(model_id)
-    prompt = intel_extractor.build_intel_prompt(chapter.content, char_names)
+    prompt = intel_extractor.build_intel_prompt(chapter.content, char_names, active_foreshadowings)
     response = await provider.generate_complete(
         messages=[Message(role="user", content=prompt)],
         system_prompt=intel_extractor.SYSTEM_PROMPT,
@@ -459,6 +471,7 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
         resolved_foreshadowings=intel_data.get("resolved_foreshadowings"),
         timeline_events=intel_data.get("timeline_events"),
         next_chapter_required_chars=intel_data.get("next_chapter_required_chars"),
+        suggested_foreshadowings=intel_data.get("suggested_foreshadowings"),
     )
     db.add(intel)
 
@@ -473,13 +486,40 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
             if cu.get("location"):
                 char.current_location = cu["location"]
 
-    # 创建新伏笔
-    for fs_desc in intel_data.get("new_foreshadowings", []):
+    # 自动回收伏笔（按 id 匹配）
+    for resolved in intel_data.get("resolved_foreshadowings", []):
+        fs_id = resolved.get("id") if isinstance(resolved, dict) else None
+        if fs_id:
+            fs = await db.get(Foreshadowing, fs_id)
+            if fs and fs.novel_id == chapter.novel_id and fs.status != "已回收":
+                fs.status = "已回收"
+                fs.resolved_chapter_id = chapter.chapter_number
+
+    # 创建新伏笔（结构化数据）
+    for fs_data in intel_data.get("new_foreshadowings", []):
+        desc = fs_data if isinstance(fs_data, str) else fs_data.get("description", "")
+        fs_type = fs_data.get("type", "中线") if isinstance(fs_data, dict) else "中线"
+        expected_ch = fs_data.get("expected_resolve_chapter") if isinstance(fs_data, dict) else None
+
+        # 计算回收范围
+        resolve_start, resolve_end = None, None
+        if expected_ch and isinstance(expected_ch, int) and expected_ch > 0:
+            if fs_type == "短线":
+                resolve_start = max(1, expected_ch - 1)
+                resolve_end = expected_ch + 1
+            elif fs_type == "中线":
+                resolve_start = max(1, expected_ch - 5)
+                resolve_end = expected_ch + 5
+            # 长线不设范围
+
         fs = Foreshadowing(
             novel_id=chapter.novel_id,
-            description=fs_desc,
+            description=desc,
             created_chapter_id=chapter.chapter_number,
             status="埋设",
+            foreshadowing_type=fs_type,
+            expected_resolve_start=resolve_start,
+            expected_resolve_end=resolve_end,
         )
         db.add(fs)
 
