@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getChapter, updateChapter, getChapterIntel,
   listCharacters, listForeshadowings, extractIntel, getModels,
+  adoptSuggestedForeshadowing,
 } from '../services/api'
 
 interface Model {
@@ -211,7 +212,7 @@ export default function ChapterEditor() {
             ref={contentRef}
             value={content}
             onChange={e => handleContentChange(e.target.value)}
-            placeholder="章节内容将在这里显示。点击"生成章节"开始创作..."
+            placeholder="章节内容将在这里显示。点击「生成章节」开始创作..."
             className="w-full h-full min-h-[600px] p-4 text-base leading-relaxed resize-none focus:outline-none bg-white rounded-lg shadow-sm"
             readOnly={generating}
           />
@@ -265,8 +266,11 @@ export default function ChapterEditor() {
                 <div>
                   <label className="text-xs text-gray-500 font-medium">新伏笔</label>
                   <div className="mt-1 space-y-1">
-                    {intel.new_foreshadowings.map((f: string, i: number) => (
-                      <div key={i} className="text-xs p-2 bg-blue-50 rounded">{f}</div>
+                    {intel.new_foreshadowings.map((f: any, i: number) => (
+                      <div key={i} className="text-xs p-2 bg-blue-50 rounded">
+                        {typeof f === 'string' ? f : f.description}
+                        {typeof f === 'object' && f.type && <span className="ml-1 text-gray-400">({f.type})</span>}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -276,8 +280,10 @@ export default function ChapterEditor() {
                 <div>
                   <label className="text-xs text-gray-500 font-medium">时间线事件</label>
                   <div className="mt-1 space-y-1">
-                    {intel.timeline_events.map((e: string, i: number) => (
-                      <div key={i} className="text-xs p-2 bg-white rounded">{e}</div>
+                    {intel.timeline_events.map((e: any, i: number) => (
+                      <div key={i} className="text-xs p-2 bg-white rounded">
+                        {typeof e === 'string' ? e : `${e.time}: ${e.event}`}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -289,6 +295,36 @@ export default function ChapterEditor() {
                   <div className="mt-1 flex flex-wrap gap-1">
                     {intel.next_chapter_required_chars.map((name: string, i: number) => (
                       <span key={i} className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded">{name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {intel.suggested_foreshadowings && intel.suggested_foreshadowings.length > 0 && (
+                <div>
+                  <label className="text-xs text-gray-500 font-medium">AI 建议的伏笔</label>
+                  <div className="mt-1 space-y-1">
+                    {intel.suggested_foreshadowings.map((sf: any, i: number) => (
+                      <div key={i} className="text-xs p-2 bg-purple-50 rounded">
+                        <p>{sf.description}</p>
+                        {sf.reason && <p className="text-gray-400 mt-0.5">理由: {sf.reason}</p>}
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={async () => {
+                              await adoptSuggestedForeshadowing(novelId, {
+                                description: sf.description,
+                                foreshadowing_type: sf.type || '中线',
+                                expected_resolve_chapter: sf.expected_resolve_chapter,
+                              })
+                              queryClient.invalidateQueries({ queryKey: ['foreshadowings', novelId] })
+                            }}
+                            className="text-purple-600 hover:text-purple-800"
+                          >
+                            采纳
+                          </button>
+                          <button className="text-gray-400 hover:text-gray-600">忽略</button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
