@@ -31,12 +31,14 @@ def build_outline_prompt(novel_settings: dict, target_chapters: int, blueprint_p
       "tags": ["标签1", "标签2"]
     }}
   ],
-  "main_plot": "主要情节概述，500字以内",
+  "main_plot": "完整故事弧线（起承转合），包含主角成长路径和核心冲突演变，1000字以内",
   "plot_points": [
     {{
       "chapter_range": "第1-10章",
       "title": "阶段标题",
-      "summary": "这个阶段的情节概述"
+      "summary": "这个阶段的情节概述",
+      "key_conflicts": "本阶段的核心冲突",
+      "foreshadowing_plan": ["计划埋设的伏笔1", "计划埋设的伏笔2"]
     }}
   ],
   "highlights": "作品亮点，200字以内",
