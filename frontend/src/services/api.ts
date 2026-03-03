@@ -29,9 +29,14 @@ export const getChapterIntel = (novelId: number, chapterId: number) => api.get(`
 
 // Foreshadowings
 export const listForeshadowings = (novelId: number) => api.get(`/novels/${novelId}/foreshadowings`)
+export const createForeshadowing = (novelId: number, data: any) => api.post(`/novels/${novelId}/foreshadowings`, data)
+export const updateForeshadowing = (novelId: number, fsId: number, data: any) => api.put(`/novels/${novelId}/foreshadowings/${fsId}`, data)
+export const adoptSuggestedForeshadowing = (novelId: number, data: any) => api.post(`/novels/${novelId}/foreshadowings/adopt-suggestion`, data)
 
 // Writing
 export const generateIdea = (data: any) => api.post('/generate/idea', data)
+export const regenerateField = (data: any) => api.post('/generate/regenerate-field', data)
+export const regenerateNovelField = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/regenerate-field`, data)
 export const generateOutline = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/outline`, data)
 export const extractIntel = (novelId: number, chapterId: number, data: any) => api.post(`/novels/${novelId}/chapters/${chapterId}/extract-intel`, data)
 

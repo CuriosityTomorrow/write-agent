@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +113,42 @@ async def update_foreshadowing(novel_id: int, fs_id: int, data: ForeshadowingUpd
         notes = fs.progress_notes or []
         notes.append(data.progress_note)
         fs.progress_notes = notes
+    await db.commit()
+    await db.refresh(fs)
+    return fs
+
+
+class AdoptSuggestionRequest(BaseModel):
+    description: str
+    foreshadowing_type: str = "中线"
+    expected_resolve_chapter: int | None = None
+
+
+@fs_router.post("/adopt-suggestion", response_model=ForeshadowingResponse)
+async def adopt_suggested_foreshadowing(
+    novel_id: int,
+    data: AdoptSuggestionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """将 AI 建议的伏笔采纳为正式伏笔"""
+    resolve_start, resolve_end = None, None
+    if data.expected_resolve_chapter and data.expected_resolve_chapter > 0:
+        if data.foreshadowing_type == "短线":
+            resolve_start = max(1, data.expected_resolve_chapter - 1)
+            resolve_end = data.expected_resolve_chapter + 1
+        elif data.foreshadowing_type == "中线":
+            resolve_start = max(1, data.expected_resolve_chapter - 5)
+            resolve_end = data.expected_resolve_chapter + 5
+
+    fs = Foreshadowing(
+        novel_id=novel_id,
+        description=data.description,
+        status="埋设",
+        foreshadowing_type=data.foreshadowing_type,
+        expected_resolve_start=resolve_start,
+        expected_resolve_end=resolve_end,
+    )
+    db.add(fs)
     await db.commit()
     await db.refresh(fs)
     return fs
