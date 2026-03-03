@@ -51,6 +51,7 @@ class ChapterIntel(Base):
     resolved_foreshadowings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     timeline_events: Mapped[list | None] = mapped_column(JSON, nullable=True)
     next_chapter_required_chars: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    suggested_foreshadowings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="intel")

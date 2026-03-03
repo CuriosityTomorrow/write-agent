@@ -46,6 +46,7 @@ class ChapterIntelResponse(BaseModel):
     resolved_foreshadowings: list | None = None
     timeline_events: list | None = None
     next_chapter_required_chars: list | None = None
+    suggested_foreshadowings: list | None = None
 
     model_config = {"from_attributes": True}
 
