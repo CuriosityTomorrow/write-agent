@@ -11,6 +11,8 @@ MODEL_CONFIGS = {
     "grok": {"class": OpenAICompatibleProvider, "base_url": "https://api.x.ai/v1", "model": "grok-3", "display": "Grok 3", "max_context": 131072, "api_key_setting": "XAI_API_KEY"},
     "gemini": {"class": GeminiProvider, "model": "gemini-2.5-pro", "max_context": 1000000, "api_key_setting": "GOOGLE_API_KEY"},
     "claude": {"class": ClaudeProvider, "model": "claude-sonnet-4-6", "max_context": 200000, "api_key_setting": "ANTHROPIC_API_KEY"},
+    "zhipu": {"class": ClaudeProvider, "base_url": "https://open.bigmodel.cn/api/anthropic", "model": "glm-5", "display": "智谱 GLM-5", "max_context": 128000, "api_key_setting": "ZHIPU_API_KEY"},
+    "gemini-flash": {"class": OpenAICompatibleProvider, "base_url": "https://deeprouter.top/v1", "model": "gemini-3-flash-preview", "display": "Gemini 3 Flash (DeepRouter)", "max_context": 128000, "api_key_setting": "DEEPROUTER_API_KEY"},
 }
 
 
@@ -27,7 +29,7 @@ def get_provider(provider_id: str) -> LLMProvider:
     elif provider_class == GeminiProvider:
         return provider_class(api_key=api_key, model=cfg["model"], max_context=cfg["max_context"])
     elif provider_class == ClaudeProvider:
-        return provider_class(api_key=api_key, model=cfg["model"], max_context=cfg["max_context"])
+        return provider_class(api_key=api_key, model=cfg["model"], max_context=cfg["max_context"], base_url=cfg.get("base_url"), display=cfg.get("display"))
     else:
         raise ValueError(f"Unknown provider class for {provider_id}")
 

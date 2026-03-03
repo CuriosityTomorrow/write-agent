@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getNovel, getOutline, listCharacters, listChapters,
-  listForeshadowings, createCharacter, createChapter, updateCharacter,
+  listForeshadowings, createCharacter, createChapter, deleteChapter, updateCharacter,
   updateOutline, regenerateNovelField, getModels, exportTxt,
   createForeshadowing,
 } from '../services/api'
@@ -316,24 +316,39 @@ export default function NovelDetail() {
           )}
           <div className="space-y-2">
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {chapters?.map((ch: any) => (
-              <Link
-                key={ch.id}
-                to={`/novel/${String(novelId)}/chapter/${String(ch.id)}`}
-                className="block bg-white rounded-lg p-4 shadow-sm hover:shadow transition"
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="font-medium">第{ch.chapter_number}章</span>
-                    {ch.title && <span className="ml-2 text-gray-600">{ch.title}</span>}
+            {chapters?.map((ch: any, idx: number) => (
+              <div key={ch.id} className="bg-white rounded-lg p-4 shadow-sm hover:shadow transition flex items-center gap-2">
+                <Link
+                  to={`/novel/${String(novelId)}/chapter/${String(ch.id)}`}
+                  className="flex-1 min-w-0"
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="font-medium">第{ch.chapter_number}章</span>
+                      {ch.title && <span className="ml-2 text-gray-600">{ch.title}</span>}
+                    </div>
+                    <div className="flex items-center gap-3 text-sm text-gray-500">
+                      {ch.actual_word_count && <span>{ch.actual_word_count}字</span>}
+                      <span className={ch.status === '已完成' ? 'text-green-600' : 'text-yellow-600'}>{ch.status}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-sm text-gray-500">
-                    {ch.actual_word_count && <span>{ch.actual_word_count}字</span>}
-                    <span className={ch.status === '已完成' ? 'text-green-600' : 'text-yellow-600'}>{ch.status}</span>
-                  </div>
-                </div>
-                {ch.chapter_outline && <p className="text-sm text-gray-500 mt-1 truncate">{ch.chapter_outline}</p>}
-              </Link>
+                  {ch.chapter_outline && <p className="text-sm text-gray-500 mt-1 truncate">{ch.chapter_outline}</p>}
+                </Link>
+                {idx === (chapters?.length || 0) - 1 && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      if (!confirm(`确定删除第${ch.chapter_number}章？此操作不可撤销。`)) return
+                      await deleteChapter(novelId, ch.id)
+                      queryClient.invalidateQueries({ queryKey: ['chapters', novelId] })
+                    }}
+                    className="text-red-400 hover:text-red-600 text-xs px-2 py-1 shrink-0"
+                    title="删除最新章节"
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
             ))}
             {(!chapters || chapters.length === 0) && <p className="text-gray-400 text-center py-8">暂无章节，点击"新建章节"开始写作</p>}
           </div>

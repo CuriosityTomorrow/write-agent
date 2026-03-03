@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createNovel, generateIdea, generateOutline, getModels } from '../services/api'
+import { createNovel, generateIdea, generateOutline, regenerateField, regenerateNovelField, updateOutline, getModels } from '../services/api'
 
 const GENRES = ['玄幻', '仙侠', '都市', '科幻', '历史', '游戏', '悬疑', '轻小说']
 const MODES = ['男频', '女频', '短篇']
@@ -39,14 +39,138 @@ export default function CreateWizard() {
   // Step 3 - AI generated
   const [ideaResult, setIdeaResult] = useState<IdeaResult>({})
 
+  // AI generate creative idea
+  const [ideaLoading, setIdeaLoading] = useState(false)
+
+  const handleGenerateCreativeIdea = async () => {
+    if (!selectedModel) { alert('请先选择 AI 模型'); return }
+    setIdeaLoading(true)
+    try {
+      const res = await regenerateField({
+        field_name: 'creative_idea',
+        current_value: creativeIdea,
+        creative_idea: creativeIdea || `一部${genre}类型的${mode}网文`,
+        genre,
+        suggestion: '',
+        model_id: selectedModel,
+      })
+      setCreativeIdea(res.data.value)
+    } catch { alert('生成失败，请重试') }
+    setIdeaLoading(false)
+  }
+
+  // Regenerate field
+  const [regenField, setRegenField] = useState<string | null>(null)
+  const [regenSuggestion, setRegenSuggestion] = useState('')
+  const [regenLoading, setRegenLoading] = useState(false)
+
+  const handleRegenerate = async (fieldKey: string) => {
+    setRegenLoading(true)
+    try {
+      const res = await regenerateField({
+        field_name: fieldKey,
+        current_value: (ideaResult as any)[fieldKey] || '',
+        creative_idea: creativeIdea,
+        genre,
+        suggestion: regenSuggestion,
+        model_id: selectedModel,
+      })
+      setIdeaResult(prev => ({ ...prev, [fieldKey]: res.data.value }))
+      setRegenField(null)
+      setRegenSuggestion('')
+    } catch {
+      alert('重新生成失败，请重试')
+    }
+    setRegenLoading(false)
+  }
+
   // Step 4
   const [title, setTitle] = useState('')
   const [authorName, setAuthorName] = useState('')
   const [targetChapters, setTargetChapters] = useState(100)
 
+  // AI generate title
+  const [titleLoading, setTitleLoading] = useState(false)
+
+  const handleGenerateTitle = async () => {
+    if (!selectedModel) { alert('请先选择 AI 模型'); return }
+    setTitleLoading(true)
+    try {
+      const context = Object.entries(ideaResult)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('\n')
+      const res = await regenerateField({
+        field_name: 'title',
+        current_value: title,
+        creative_idea: `【创意想法】\n${creativeIdea}\n\n【已生成的设定】\n${context}`,
+        genre,
+        suggestion: '',
+        model_id: selectedModel,
+      })
+      setTitle(res.data.value)
+    } catch { alert('生成失败，请重试') }
+    setTitleLoading(false)
+  }
+
   // Step 5 - outline
   const [outlineResult, setOutlineResult] = useState<any>(null)
   const [novelId, setNovelId] = useState<number | null>(null)
+
+  // Outline editing (step 4)
+  const [outlineRegenField, setOutlineRegenField] = useState<string | null>(null)
+  const [outlineRegenSuggestion, setOutlineRegenSuggestion] = useState('')
+  const [outlineRegenLoading, setOutlineRegenLoading] = useState(false)
+
+  const handleOutlineRegenerate = async (fieldName: string) => {
+    if (!novelId || !selectedModel) return
+    setOutlineRegenLoading(true)
+    try {
+      let currentValue = ''
+      if (fieldName === 'plot_points') {
+        currentValue = JSON.stringify(outlineResult?.plot_points || [], null, 2)
+      } else {
+        currentValue = outlineResult?.[fieldName] || ''
+      }
+      const res = await regenerateNovelField(novelId, {
+        field_name: fieldName,
+        current_value: currentValue,
+        suggestion: outlineRegenSuggestion,
+        model_id: selectedModel,
+      })
+      if (fieldName === 'plot_points') {
+        try {
+          const parsed = JSON.parse(res.data.value)
+          setOutlineResult((prev: any) => ({ ...prev, plot_points: parsed }))
+        } catch {
+          setOutlineResult((prev: any) => ({ ...prev, plot_points: res.data.value }))
+        }
+      } else {
+        setOutlineResult((prev: any) => ({ ...prev, [fieldName]: res.data.value }))
+      }
+      setOutlineRegenField(null)
+      setOutlineRegenSuggestion('')
+    } catch {
+      alert('重新生成失败，请重试')
+    }
+    setOutlineRegenLoading(false)
+  }
+
+  const handleConfirmOutline = async () => {
+    if (!novelId || !outlineResult) return
+    setLoading(true)
+    try {
+      await updateOutline(novelId, {
+        story_background: outlineResult.story_background,
+        main_plot: outlineResult.main_plot,
+        plot_points: outlineResult.plot_points,
+      })
+      setStep(5)
+    } catch {
+      alert('保存大纲失败')
+    }
+    setLoading(false)
+  }
 
   useEffect(() => {
     getModels().then(r => {
@@ -180,11 +304,20 @@ export default function CreateWizard() {
         {/* Step 1: Creative idea */}
         {step === 1 && (
           <div>
-            <h2 className="text-lg font-semibold mb-4">输入你的创意想法</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">输入你的创意想法</h2>
+              <button
+                onClick={handleGenerateCreativeIdea}
+                disabled={ideaLoading}
+                className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                {ideaLoading ? 'AI 思考中...' : 'AI 帮我想'}
+              </button>
+            </div>
             <textarea
               value={creativeIdea}
               onChange={e => setCreativeIdea(e.target.value)}
-              placeholder="描述你想写的故事核心创意，比如：一个废柴少年意外获得上古神器，踏上修仙之路..."
+              placeholder="描述你想写的故事核心创意，或点击右上角「AI 帮我想」自动生成..."
               className="w-full h-40 border rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <div className="flex gap-3 mt-4">
@@ -219,13 +352,40 @@ export default function CreateWizard() {
                 { key: 'style_tone', label: '风格基调' },
               ].map(({ key, label }) => (
                 <div key={key}>
-                  <label className="block text-sm font-medium mb-1">{label}</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium">{label}</label>
+                    <button
+                      onClick={() => { setRegenField(regenField === key ? null : key); setRegenSuggestion('') }}
+                      disabled={regenLoading}
+                      className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      {regenField === key ? '取消' : '重新生成'}
+                    </button>
+                  </div>
                   <textarea
                     value={(ideaResult as any)[key] || ''}
                     onChange={e => setIdeaResult(prev => ({ ...prev, [key]: e.target.value }))}
                     className="w-full border rounded-lg p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={2}
                   />
+                  {regenField === key && (
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        value={regenSuggestion}
+                        onChange={e => setRegenSuggestion(e.target.value)}
+                        placeholder="输入修改建议（可选，留空则直接重新生成）"
+                        className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        onKeyDown={e => { if (e.key === 'Enter') handleRegenerate(key) }}
+                      />
+                      <button
+                        onClick={() => handleRegenerate(key)}
+                        disabled={regenLoading}
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {regenLoading ? '生成中...' : '生成'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -246,11 +406,20 @@ export default function CreateWizard() {
             <h2 className="text-lg font-semibold mb-4">作品信息</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">小说名称</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium">小说名称</label>
+                  <button
+                    onClick={handleGenerateTitle}
+                    disabled={titleLoading}
+                    className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                  >
+                    {titleLoading ? '生成中...' : 'AI 帮我想'}
+                  </button>
+                </div>
                 <input
                   value={title}
                   onChange={e => setTitle(e.target.value)}
-                  placeholder="请输入小说名称"
+                  placeholder="请输入小说名称，或点击右上角 AI 帮你取名"
                   className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -288,22 +457,65 @@ export default function CreateWizard() {
           </div>
         )}
 
-        {/* Step 4: Outline */}
+        {/* Step 4: Outline (editable) */}
         {step === 4 && outlineResult && (
           <div>
-            <h2 className="text-lg font-semibold mb-4">大纲预览</h2>
-            {outlineResult.story_background && (
-              <div className="mb-4">
+            <h2 className="text-lg font-semibold mb-4">大纲编辑</h2>
+            <p className="text-sm text-gray-500 mb-4">你可以手动编辑或使用 AI 重新生成各字段</p>
+
+            {/* story_background */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="font-medium text-sm text-gray-600">故事背景</h3>
-                <p className="text-sm mt-1">{outlineResult.story_background}</p>
+                <button
+                  onClick={() => { setOutlineRegenField(outlineRegenField === 'story_background' ? null : 'story_background'); setOutlineRegenSuggestion('') }}
+                  disabled={outlineRegenLoading}
+                  className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                >
+                  {outlineRegenField === 'story_background' ? '取消' : '重新生成'}
+                </button>
               </div>
-            )}
-            {outlineResult.main_plot && (
-              <div className="mb-4">
+              <textarea
+                value={outlineResult.story_background || ''}
+                onChange={e => setOutlineResult((prev: any) => ({ ...prev, story_background: e.target.value }))}
+                className="w-full border rounded-lg p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+              />
+              {outlineRegenField === 'story_background' && (
+                <div className="mt-1 flex gap-2">
+                  <input value={outlineRegenSuggestion} onChange={e => setOutlineRegenSuggestion(e.target.value)} placeholder="输入修改建议（可选）" className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" onKeyDown={e => { if (e.key === 'Enter') handleOutlineRegenerate('story_background') }} />
+                  <button onClick={() => handleOutlineRegenerate('story_background')} disabled={outlineRegenLoading} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{outlineRegenLoading ? '生成中...' : '生成'}</button>
+                </div>
+              )}
+            </div>
+
+            {/* main_plot */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="font-medium text-sm text-gray-600">主线情节</h3>
-                <p className="text-sm mt-1">{outlineResult.main_plot}</p>
+                <button
+                  onClick={() => { setOutlineRegenField(outlineRegenField === 'main_plot' ? null : 'main_plot'); setOutlineRegenSuggestion('') }}
+                  disabled={outlineRegenLoading}
+                  className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                >
+                  {outlineRegenField === 'main_plot' ? '取消' : '重新生成'}
+                </button>
               </div>
-            )}
+              <textarea
+                value={outlineResult.main_plot || ''}
+                onChange={e => setOutlineResult((prev: any) => ({ ...prev, main_plot: e.target.value }))}
+                className="w-full border rounded-lg p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+              />
+              {outlineRegenField === 'main_plot' && (
+                <div className="mt-1 flex gap-2">
+                  <input value={outlineRegenSuggestion} onChange={e => setOutlineRegenSuggestion(e.target.value)} placeholder="输入修改建议（可选）" className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" onKeyDown={e => { if (e.key === 'Enter') handleOutlineRegenerate('main_plot') }} />
+                  <button onClick={() => handleOutlineRegenerate('main_plot')} disabled={outlineRegenLoading} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{outlineRegenLoading ? '生成中...' : '生成'}</button>
+                </div>
+              )}
+            </div>
+
+            {/* characters (read-only preview) */}
             {outlineResult.characters && (
               <div className="mb-4">
                 <h3 className="font-medium text-sm text-gray-600">角色</h3>
@@ -316,21 +528,76 @@ export default function CreateWizard() {
                 </div>
               </div>
             )}
+
+            {/* plot_points (editable) */}
             {outlineResult.plot_points && (
               <div className="mb-4">
-                <h3 className="font-medium text-sm text-gray-600">情节点</h3>
-                <div className="space-y-1 mt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-medium text-sm text-gray-600">情节点</h3>
+                  <button
+                    onClick={() => { setOutlineRegenField(outlineRegenField === 'plot_points' ? null : 'plot_points'); setOutlineRegenSuggestion('') }}
+                    disabled={outlineRegenLoading}
+                    className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                  >
+                    {outlineRegenField === 'plot_points' ? '取消' : '重新生成全部'}
+                  </button>
+                </div>
+                {outlineRegenField === 'plot_points' && (
+                  <div className="mb-2 flex gap-2">
+                    <input value={outlineRegenSuggestion} onChange={e => setOutlineRegenSuggestion(e.target.value)} placeholder="输入修改建议（可选）" className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" onKeyDown={e => { if (e.key === 'Enter') handleOutlineRegenerate('plot_points') }} />
+                    <button onClick={() => handleOutlineRegenerate('plot_points')} disabled={outlineRegenLoading} className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{outlineRegenLoading ? '生成中...' : '生成'}</button>
+                  </div>
+                )}
+                <div className="space-y-2 mt-1">
                   {outlineResult.plot_points.map((p: any, i: number) => (
-                    <div key={i} className="text-sm">{i + 1}. {typeof p === 'string' ? p : p.description || JSON.stringify(p)}</div>
+                    <div key={i} className="bg-gray-50 rounded p-2">
+                      {typeof p === 'string' ? (
+                        <input
+                          value={p}
+                          onChange={e => {
+                            const updated = [...outlineResult.plot_points]
+                            updated[i] = e.target.value
+                            setOutlineResult((prev: any) => ({ ...prev, plot_points: updated }))
+                          }}
+                          className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <div className="space-y-1">
+                          <input
+                            value={p.title || ''}
+                            onChange={e => {
+                              const updated = [...outlineResult.plot_points]
+                              updated[i] = { ...p, title: e.target.value }
+                              setOutlineResult((prev: any) => ({ ...prev, plot_points: updated }))
+                            }}
+                            placeholder="标题"
+                            className="w-full border rounded px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <textarea
+                            value={p.summary || p.description || ''}
+                            onChange={e => {
+                              const updated = [...outlineResult.plot_points]
+                              updated[i] = { ...p, summary: e.target.value }
+                              setOutlineResult((prev: any) => ({ ...prev, plot_points: updated }))
+                            }}
+                            placeholder="概要"
+                            className="w-full border rounded px-2 py-1 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            rows={2}
+                          />
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
             )}
+
             <button
-              onClick={() => setStep(5)}
-              className="mt-4 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+              onClick={handleConfirmOutline}
+              disabled={loading}
+              className="mt-4 bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
             >
-              确认大纲，开始写作
+              {loading ? '保存中...' : '确认大纲，开始写作'}
             </button>
           </div>
         )}

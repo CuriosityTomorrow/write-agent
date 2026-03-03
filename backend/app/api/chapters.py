@@ -69,6 +69,23 @@ async def update_chapter(novel_id: int, chapter_id: int, data: ChapterUpdate, db
     return chapter
 
 
+@router.delete("/{chapter_id}")
+async def delete_chapter(novel_id: int, chapter_id: int, db: AsyncSession = Depends(get_db)):
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.novel_id != novel_id:
+        raise HTTPException(404, "Chapter not found")
+    # 只允许删除最新的章节（防止中间删除导致章节号混乱）
+    result = await db.execute(
+        select(func.max(Chapter.chapter_number)).where(Chapter.novel_id == novel_id)
+    )
+    max_num = result.scalar()
+    if chapter.chapter_number != max_num:
+        raise HTTPException(400, "只能删除最新的章节")
+    await db.delete(chapter)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/{chapter_id}/intel", response_model=ChapterIntelResponse | None)
 async def get_chapter_intel(novel_id: int, chapter_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ChapterIntel).where(ChapterIntel.chapter_id == chapter_id))

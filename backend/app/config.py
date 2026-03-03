@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     MINIMAX_GROUP_ID: str = ""
     XAI_API_KEY: str = ""
     DASHSCOPE_API_KEY: str = ""
+    DEEPROUTER_API_KEY: str = ""
     UPLOAD_DIR: str = "./uploads"
 
     model_config = {"env_file": ".env", "extra": "ignore"}

@@ -7,3 +7,6 @@ dist/
 uploads/
 *.egg-info/
 .mypy_cache/
+*.db
+.DS_Store
+test/

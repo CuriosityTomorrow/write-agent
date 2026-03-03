@@ -4,10 +4,14 @@ from app.llm.base import LLMProvider, Message, GenerateConfig
 
 
 class ClaudeProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6", max_context: int = 200000):
-        self._client = AsyncAnthropic(api_key=api_key)
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6", max_context: int = 200000, base_url: str | None = None, display: str | None = None):
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self._client = AsyncAnthropic(**kwargs)
         self._model = model
         self._max_context = max_context
+        self._display = display
 
     async def generate(self, messages: list[Message], system_prompt: str = "", config: GenerateConfig | None = None) -> AsyncGenerator[str, None]:
         config = config or GenerateConfig()
@@ -29,4 +33,4 @@ class ClaudeProvider(LLMProvider):
         return self._model
 
     def display_name(self) -> str:
-        return f"Claude ({self._model})"
+        return self._display or f"Claude ({self._model})"

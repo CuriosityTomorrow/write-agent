@@ -25,6 +25,7 @@ export const listChapters = (novelId: number) => api.get(`/novels/${novelId}/cha
 export const createChapter = (novelId: number, data: any) => api.post(`/novels/${novelId}/chapters`, data)
 export const getChapter = (novelId: number, chapterId: number) => api.get(`/novels/${novelId}/chapters/${chapterId}`)
 export const updateChapter = (novelId: number, chapterId: number, data: any) => api.put(`/novels/${novelId}/chapters/${chapterId}`, data)
+export const deleteChapter = (novelId: number, chapterId: number) => api.delete(`/novels/${novelId}/chapters/${chapterId}`)
 export const getChapterIntel = (novelId: number, chapterId: number) => api.get(`/novels/${novelId}/chapters/${chapterId}/intel`)
 
 // Foreshadowings

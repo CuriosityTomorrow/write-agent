@@ -108,6 +108,15 @@ export default function ChapterEditor() {
     await updateChapter(novelId, chapterId, { content })
     setSaved(true)
     queryClient.invalidateQueries({ queryKey: ['chapter', novelId, chapterId] })
+    // 保存后自动重新提取章节情报
+    if (selectedModel && content.trim()) {
+      setExtracting(true)
+      try {
+        await extractIntel(novelId, chapterId, { model_id: selectedModel })
+        refetchIntel()
+      } catch {}
+      setExtracting(false)
+    }
   }
 
   const handleContentChange = (val: string) => {
