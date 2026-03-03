@@ -100,6 +100,10 @@ async def update_foreshadowing(novel_id: int, fs_id: int, data: ForeshadowingUpd
     fs = await db.get(Foreshadowing, fs_id)
     if not fs or fs.novel_id != novel_id:
         raise HTTPException(404, "Foreshadowing not found")
+    for field in ("description", "foreshadowing_type", "expected_resolve_start", "expected_resolve_end"):
+        val = getattr(data, field, None)
+        if val is not None:
+            setattr(fs, field, val)
     if data.status:
         fs.status = data.status
     if data.resolved_chapter_id:

@@ -38,12 +38,19 @@ class NarrativeBlueprintResponse(BaseModel):
 class ForeshadowingCreate(BaseModel):
     description: str
     created_chapter_id: int | None = None
+    foreshadowing_type: str | None = None
+    expected_resolve_start: int | None = None
+    expected_resolve_end: int | None = None
 
 
 class ForeshadowingUpdate(BaseModel):
     status: str | None = None
     resolved_chapter_id: int | None = None
     progress_note: str | None = None
+    description: str | None = None
+    foreshadowing_type: str | None = None
+    expected_resolve_start: int | None = None
+    expected_resolve_end: int | None = None
 
 
 class ForeshadowingResponse(BaseModel):
@@ -54,5 +61,8 @@ class ForeshadowingResponse(BaseModel):
     status: str
     resolved_chapter_id: int | None = None
     progress_notes: list | None = None
+    foreshadowing_type: str | None = None
+    expected_resolve_start: int | None = None
+    expected_resolve_end: int | None = None
 
     model_config = {"from_attributes": True}
