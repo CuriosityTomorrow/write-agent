@@ -16,12 +16,22 @@ def build_chapter_prompt(
     foreshadowing_context: str,
     chapter_config: str,
     blueprint_context: str = "",
+    previous_chapters: str = "",
+    summary_intel: str = "",
+    optional_characters: str = "",
 ) -> str:
     sections = [
         f"【小说信息】\n{novel_info}",
-        f"【本章涉及角色】\n{character_context}",
-        f"【近期章节情报】\n{recent_intel}",
     ]
+    if previous_chapters:
+        sections.append(f"【前文原文】\n{previous_chapters}")
+    sections.append(f"【本章涉及角色】\n{character_context}")
+    if optional_characters:
+        sections.append(f"【其他相关角色】\n{optional_characters}")
+    if recent_intel:
+        sections.append(f"【近期章节情报（第3-5章）】\n{recent_intel}")
+    if summary_intel:
+        sections.append(f"【早期章节摘要（第6-15章）】\n{summary_intel}")
     if foreshadowing_context:
         sections.append(f"【伏笔追踪】\n{foreshadowing_context}")
     if blueprint_context:
