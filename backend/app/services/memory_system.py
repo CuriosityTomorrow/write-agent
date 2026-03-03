@@ -9,8 +9,33 @@ from app.models import (
 )
 
 
+def estimate_tokens(text: str) -> int:
+    """中文字符 ≈ 0.7 token，ASCII ≈ 0.25 token"""
+    if not text:
+        return 0
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    other_chars = len(text) - chinese_chars
+    return int(chinese_chars * 0.7 + other_chars * 0.25)
+
+
+def compute_foreshadowing_urgency(current_chapter: int, fs) -> tuple[str, str]:
+    """返回 (紧迫度标签, 行动指示)"""
+    start = fs.expected_resolve_start
+    end = fs.expected_resolve_end
+    if start is None or end is None:
+        return "潜伏", ""
+    if current_chapter > end:
+        return "紧急回收", "请在本章回收此伏笔"
+    elif current_chapter >= start:
+        return "可回收", "如剧情合适，可以回收此伏笔"
+    elif current_chapter >= start - 5:
+        return "铺垫", "请自然提及此伏笔相关细节，保持读者记忆"
+    else:
+        return "潜伏", ""
+
+
 class ContextBuilder:
-    """为章节生成组装完整的上下文信息"""
+    """为章节生成组装完整的上下文信息（分层记忆 P0-P6）"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -22,19 +47,60 @@ class ContextBuilder:
         required_char_ids: list[int],
         optional_char_ids: list[int],
         foreshadowing_ids: list[int] | None = None,
+        max_context_tokens: int = 128000,
     ) -> dict:
-        """组装写作上下文，返回各部分文本"""
+        """分层组装写作上下文，按优先级 P0-P6"""
         novel = await self.db.get(Novel, novel_id)
+        token_budget = int(max_context_tokens * 0.25)
+        used_tokens = 0
 
-        context = {
-            "novel_info": await self._build_novel_info(novel),
-            "character_context": await self._build_character_context(novel_id, required_char_ids, optional_char_ids),
-            "recent_intel": await self._build_recent_intel(novel_id, chapter_number),
-            "foreshadowing_context": await self._build_foreshadowing_context(novel_id, foreshadowing_ids),
-            "blueprint_context": await self._build_blueprint_context(novel),
-            "style_prompt": await self._build_style_prompt(novel),
-        }
-        return context
+        layers = {}
+
+        # P0: 小说骨架
+        p0 = await self._build_novel_info(novel)
+        layers["novel_info"] = p0
+        used_tokens += estimate_tokens(p0)
+
+        # P1: 必选角色
+        p1 = await self._build_character_context(novel_id, required_char_ids, [])
+        layers["character_context"] = p1
+        used_tokens += estimate_tokens(p1)
+
+        # P2: 前1-2章原文
+        p2 = await self._build_previous_chapters(novel_id, chapter_number)
+        layers["previous_chapters"] = p2
+        used_tokens += estimate_tokens(p2)
+
+        # P3: 伏笔系统
+        p3 = await self._build_foreshadowing_context(novel_id, chapter_number, foreshadowing_ids)
+        layers["foreshadowing_context"] = p3
+        used_tokens += estimate_tokens(p3)
+
+        # P4: 前3-5章完整情报
+        p4 = await self._build_full_intel(novel_id, chapter_number)
+        layers["recent_intel"] = p4
+        used_tokens += estimate_tokens(p4)
+
+        # P5: 前6-15章情节摘要
+        p5 = await self._build_summary_intel(novel_id, chapter_number)
+        if used_tokens + estimate_tokens(p5) <= token_budget:
+            layers["summary_intel"] = p5
+            used_tokens += estimate_tokens(p5)
+        else:
+            layers["summary_intel"] = ""
+
+        # P6: 可选角色 + 角色关系
+        p6 = await self._build_character_context(novel_id, [], optional_char_ids)
+        if used_tokens + estimate_tokens(p6) <= token_budget:
+            layers["optional_characters"] = p6
+            used_tokens += estimate_tokens(p6)
+        else:
+            layers["optional_characters"] = ""
+
+        layers["blueprint_context"] = await self._build_blueprint_context(novel)
+        layers["style_prompt"] = await self._build_style_prompt(novel)
+
+        return layers
 
     async def _build_novel_info(self, novel: Novel) -> str:
         parts = [f"小说: {novel.title}", f"类型: {novel.genre}", f"模式: {novel.mode}"]
@@ -44,13 +110,34 @@ class ContextBuilder:
             parts.append(f"核心冲突: {novel.core_conflict}")
         if novel.power_system:
             parts.append(f"力量体系: {novel.power_system}")
-
-        # 加载大纲摘要
+        if novel.protagonist_identity:
+            parts.append(f"主角: {novel.protagonist_identity}")
         result = await self.db.execute(select(Outline).where(Outline.novel_id == novel.id))
         outline = result.scalar_one_or_none()
-        if outline and outline.main_plot:
-            parts.append(f"主线情节: {outline.main_plot}")
+        if outline:
+            if outline.story_background:
+                parts.append(f"故事背景: {outline.story_background}")
+            if outline.main_plot:
+                parts.append(f"主线情节: {outline.main_plot}")
         return "\n".join(parts)
+
+    async def _build_previous_chapters(self, novel_id: int, current_chapter_number: int) -> str:
+        """获取前 1-2 章完整原文"""
+        result = await self.db.execute(
+            select(Chapter)
+            .where(Chapter.novel_id == novel_id, Chapter.chapter_number < current_chapter_number)
+            .order_by(Chapter.chapter_number.desc())
+            .limit(2)
+        )
+        chapters = list(reversed(result.scalars().all()))
+        if not chapters:
+            return "（这是第一章，暂无前文）"
+        parts = []
+        for ch in chapters:
+            header = f"--- 第{ch.chapter_number}章 {ch.title or ''} ---"
+            content = ch.content or "（无内容）"
+            parts.append(f"{header}\n{content}")
+        return "\n\n".join(parts)
 
     async def _build_character_context(
         self, novel_id: int, required_ids: list[int], optional_ids: list[int]
@@ -103,44 +190,10 @@ class ContextBuilder:
             lines.append(f"  情绪: {char.emotional_state}")
         return "\n".join(lines)
 
-    async def _build_recent_intel(self, novel_id: int, current_chapter_number: int) -> str:
-        """获取近期章节情报: 前2章完整情报 + 前3-5章摘要"""
-        result = await self.db.execute(
-            select(Chapter)
-            .where(Chapter.novel_id == novel_id, Chapter.chapter_number < current_chapter_number)
-            .order_by(Chapter.chapter_number.desc())
-            .limit(5)
-        )
-        recent_chapters = list(reversed(result.scalars().all()))
-        parts = []
-
-        for i, ch in enumerate(recent_chapters):
-            result = await self.db.execute(
-                select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
-            )
-            intel = result.scalar_one_or_none()
-            if not intel:
-                continue
-
-            distance = current_chapter_number - ch.chapter_number
-            if distance <= 2:
-                # 近期: 完整情报
-                parts.append(f"--- 第{ch.chapter_number}章 {ch.title or ''} ---")
-                parts.append(f"情节: {intel.plot_summary or ''}")
-                if intel.character_updates:
-                    for cu in intel.character_updates:
-                        parts.append(f"  {cu.get('name','')}: {cu.get('status_change','')}")
-                if intel.relationship_changes:
-                    for rc in intel.relationship_changes:
-                        parts.append(f"  关系变化: {rc.get('char_a','')}↔{rc.get('char_b','')}: {rc.get('change','')}")
-            else:
-                # 中期: 仅摘要
-                parts.append(f"第{ch.chapter_number}章摘要: {intel.plot_summary or ''}")
-
-        return "\n".join(parts) if parts else "（这是第一章，暂无前文情报）"
-
-    async def _build_foreshadowing_context(self, novel_id: int, selected_ids: list[int] | None) -> str:
-        # 所有未解决伏笔
+    async def _build_foreshadowing_context(
+        self, novel_id: int, current_chapter: int, selected_ids: list[int] | None
+    ) -> str:
+        """构建伏笔上下文，按紧迫度排序并附带行动指示"""
         result = await self.db.execute(
             select(Foreshadowing).where(
                 Foreshadowing.novel_id == novel_id,
@@ -150,12 +203,94 @@ class ContextBuilder:
         active = result.scalars().all()
         if not active:
             return ""
-
-        parts = ["当前活跃伏笔:"]
+        urgency_order = {"紧急回收": 0, "可回收": 1, "铺垫": 2, "潜伏": 3}
+        items = []
         for f in active:
-            marker = "【本章推进】" if selected_ids and f.id in selected_ids else ""
-            parts.append(f"  - {f.description} ({f.status}) {marker}")
+            urgency, instruction = compute_foreshadowing_urgency(current_chapter, f)
+            items.append((urgency_order.get(urgency, 3), urgency, instruction, f))
+        items.sort(key=lambda x: x[0])
+        parts = ["当前活跃伏笔:"]
+        for _, urgency, instruction, f in items:
+            selected_marker = "【本章推进】" if selected_ids and f.id in selected_ids else ""
+            range_info = ""
+            if f.expected_resolve_start and f.expected_resolve_end:
+                range_info = f"，预期第{f.expected_resolve_start}-{f.expected_resolve_end}章回收"
+            elif f.foreshadowing_type == "长线":
+                range_info = "，长线伏笔"
+            line = f"  [{urgency}] #{f.id} {f.description}（埋设于第{f.created_chapter_id or '?'}章{range_info}）{selected_marker}"
+            if instruction:
+                line += f"\n    → {instruction}"
+            parts.append(line)
         return "\n".join(parts)
+
+    async def _build_full_intel(self, novel_id: int, current_chapter_number: int) -> str:
+        """前 3-5 章：完整情报"""
+        result = await self.db.execute(
+            select(Chapter)
+            .where(
+                Chapter.novel_id == novel_id,
+                Chapter.chapter_number < current_chapter_number,
+                Chapter.chapter_number >= current_chapter_number - 5,
+                Chapter.chapter_number < current_chapter_number - 2,
+            )
+            .order_by(Chapter.chapter_number)
+        )
+        chapters = result.scalars().all()
+        if not chapters:
+            return ""
+        parts = []
+        for ch in chapters:
+            intel_result = await self.db.execute(
+                select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
+            )
+            intel = intel_result.scalar_one_or_none()
+            if not intel:
+                continue
+            parts.append(f"--- 第{ch.chapter_number}章 {ch.title or ''} ---")
+            parts.append(f"情节: {intel.plot_summary or ''}")
+            if intel.character_updates:
+                for cu in intel.character_updates:
+                    updates = []
+                    if cu.get("status_change"):
+                        updates.append(f"状态: {cu['status_change']}")
+                    if cu.get("emotional_state"):
+                        updates.append(f"情绪: {cu['emotional_state']}")
+                    if cu.get("location"):
+                        updates.append(f"位置: {cu['location']}")
+                    if updates:
+                        parts.append(f"  {cu.get('name', '')}: {', '.join(updates)}")
+            if intel.relationship_changes:
+                for rc in intel.relationship_changes:
+                    parts.append(f"  关系变化: {rc.get('char_a', '')}↔{rc.get('char_b', '')}: {rc.get('change', '')}")
+            if intel.timeline_events:
+                for te in intel.timeline_events:
+                    if isinstance(te, dict):
+                        parts.append(f"  时间线: {te.get('time', '')}: {te.get('event', '')}")
+        return "\n".join(parts) if parts else ""
+
+    async def _build_summary_intel(self, novel_id: int, current_chapter_number: int) -> str:
+        """前 6-15 章：仅情节摘要"""
+        result = await self.db.execute(
+            select(Chapter)
+            .where(
+                Chapter.novel_id == novel_id,
+                Chapter.chapter_number < current_chapter_number - 5,
+                Chapter.chapter_number >= current_chapter_number - 15,
+            )
+            .order_by(Chapter.chapter_number)
+        )
+        chapters = result.scalars().all()
+        if not chapters:
+            return ""
+        parts = []
+        for ch in chapters:
+            intel_result = await self.db.execute(
+                select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
+            )
+            intel = intel_result.scalar_one_or_none()
+            if intel and intel.plot_summary:
+                parts.append(f"第{ch.chapter_number}章摘要: {intel.plot_summary}")
+        return "\n".join(parts) if parts else ""
 
     async def _build_blueprint_context(self, novel: Novel) -> str:
         if not novel.selected_blueprint_id:
