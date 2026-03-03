@@ -26,6 +26,8 @@ export default function ChapterEditor() {
   const [models, setModels] = useState<Model[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [saved, setSaved] = useState(true)
+  const [showRegenInput, setShowRegenInput] = useState(false)
+  const [regenSuggestion, setRegenSuggestion] = useState('')
 
   const { data: chapter } = useQuery({
     queryKey: ['chapter', novelId, chapterId],
@@ -58,18 +60,20 @@ export default function ChapterEditor() {
     }
   }, [chapter])
 
-  const generateChapter = async () => {
+  const generateChapter = async (suggestion: string = '') => {
     if (!selectedModel) {
       alert('请先选择 AI 模型')
       return
     }
     setGenerating(true)
+    setShowRegenInput(false)
+    setRegenSuggestion('')
     setContent('')
     try {
       const response = await fetch(`/api/novels/${novelId}/chapters/${chapterId}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: selectedModel }),
+        body: JSON.stringify({ model_id: selectedModel, suggestion }),
       })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
@@ -134,7 +138,13 @@ export default function ChapterEditor() {
             ))}
           </select>
           <button
-            onClick={generateChapter}
+            onClick={() => {
+              if (content && !generating) {
+                setShowRegenInput(!showRegenInput)
+              } else {
+                generateChapter()
+              }
+            }}
             disabled={generating}
             className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
           >
@@ -149,6 +159,32 @@ export default function ChapterEditor() {
           </button>
         </div>
       </div>
+
+      {/* Regen suggestion bar */}
+      {showRegenInput && (
+        <div className="bg-yellow-50 border-b px-4 py-2 flex items-center gap-3">
+          <input
+            value={regenSuggestion}
+            onChange={e => setRegenSuggestion(e.target.value)}
+            placeholder="输入修改建议（留空则完全重写）"
+            className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onKeyDown={e => { if (e.key === 'Enter') generateChapter(regenSuggestion) }}
+            autoFocus
+          />
+          <button
+            onClick={() => generateChapter(regenSuggestion)}
+            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700"
+          >
+            {regenSuggestion.trim() ? '改写' : '重写'}
+          </button>
+          <button
+            onClick={() => { setShowRegenInput(false); setRegenSuggestion('') }}
+            className="text-gray-500 text-sm hover:text-gray-700"
+          >
+            取消
+          </button>
+        </div>
+      )}
 
       {/* Main area */}
       <div className="flex-1 flex overflow-hidden">

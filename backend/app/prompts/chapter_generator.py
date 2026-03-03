@@ -19,6 +19,8 @@ def build_chapter_prompt(
     previous_chapters: str = "",
     summary_intel: str = "",
     optional_characters: str = "",
+    rewrite_content: str = "",
+    rewrite_suggestion: str = "",
 ) -> str:
     sections = [
         f"【小说信息】\n{novel_info}",
@@ -37,6 +39,12 @@ def build_chapter_prompt(
     if blueprint_context:
         sections.append(f"【叙事节奏指导】\n{blueprint_context}")
     sections.append(f"【本章要求】\n{chapter_config}")
-    sections.append("\n请直接开始写作，先输出章节标题（格式：第X章 标题），然后是正文内容。不要输出任何解释性文字。")
+
+    if rewrite_content and rewrite_suggestion:
+        sections.append(f"【当前章节内容（需改写）】\n{rewrite_content}")
+        sections.append(f"【修改建议】\n{rewrite_suggestion}")
+        sections.append("\n请根据修改建议，在当前章节内容的基础上进行改写。保持整体结构和情节走向，按照建议调整相关内容。直接输出改写后的完整章节（包含章节标题），不要输出任何解释性文字。")
+    else:
+        sections.append("\n请直接开始写作，先输出章节标题（格式：第X章 标题），然后是正文内容。不要输出任何解释性文字。")
 
     return "\n\n".join(sections)

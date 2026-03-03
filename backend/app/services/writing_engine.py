@@ -356,6 +356,7 @@ async def generate_chapter_stream(
     chapter_id: int,
     model_id: str,
     db: AsyncSession,
+    suggestion: str = "",
 ) -> AsyncGenerator[str, None]:
     """流式生成章节内容"""
     chapter = await db.get(Chapter, chapter_id)
@@ -409,6 +410,8 @@ async def generate_chapter_stream(
         previous_chapters=ctx["previous_chapters"],
         summary_intel=ctx["summary_intel"],
         optional_characters=ctx["optional_characters"],
+        rewrite_content=chapter.content if suggestion else "",
+        rewrite_suggestion=suggestion,
     )
     full_content = ""
     async for chunk in provider.generate(

@@ -7,9 +7,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Novel, Character, Chapter, Outline
+from pydantic import BaseModel
 from app.schemas.novel import IdeaRequest, IdeaResponse
 from app.schemas.chapter import GenerateChapterRequest, GenerateOutlineRequest
 from app.services import writing_engine
+
+
+class RegenerateFieldRequest(BaseModel):
+    field_name: str
+    current_value: str
+    creative_idea: str
+    genre: str
+    suggestion: str = ""
+    model_id: str = "deepseek"
+
+
+class RegenerateNovelFieldRequest(BaseModel):
+    field_name: str
+    current_value: str = ""
+    suggestion: str = ""
+    model_id: str = "deepseek"
+    chapter_number: int | None = None
+
 
 router = APIRouter(prefix="/api", tags=["writing"])
 
@@ -18,6 +37,37 @@ router = APIRouter(prefix="/api", tags=["writing"])
 async def api_generate_idea(data: IdeaRequest, db: AsyncSession = Depends(get_db)):
     result = await writing_engine.generate_idea(data.genre, data.creative_idea, data.model_id, db)
     return result
+
+
+@router.post("/generate/regenerate-field")
+async def api_regenerate_field(data: RegenerateFieldRequest):
+    result = await writing_engine.regenerate_single_field(
+        field_name=data.field_name,
+        current_value=data.current_value,
+        creative_idea=data.creative_idea,
+        genre=data.genre,
+        suggestion=data.suggestion,
+        model_id=data.model_id,
+    )
+    return {"value": result}
+
+
+@router.post("/novels/{novel_id}/generate/regenerate-field")
+async def api_regenerate_novel_field(
+    novel_id: int,
+    data: RegenerateNovelFieldRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await writing_engine.regenerate_novel_field(
+        novel_id=novel_id,
+        field_name=data.field_name,
+        current_value=data.current_value,
+        suggestion=data.suggestion,
+        model_id=data.model_id,
+        db=db,
+        chapter_number=data.chapter_number,
+    )
+    return {"value": result}
 
 
 @router.post("/novels/{novel_id}/generate/outline")
@@ -63,7 +113,7 @@ async def api_generate_chapter(
     db: AsyncSession = Depends(get_db),
 ):
     async def event_stream():
-        async for chunk in writing_engine.generate_chapter_stream(novel_id, chapter_id, data.model_id, db):
+        async for chunk in writing_engine.generate_chapter_stream(novel_id, chapter_id, data.model_id, db, suggestion=data.suggestion):
             yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
