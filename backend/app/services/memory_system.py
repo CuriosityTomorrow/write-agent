@@ -191,19 +191,37 @@ class ContextBuilder:
         return "\n".join(parts)
 
     def _format_character_full(self, char: Character) -> str:
-        lines = [f"[必选] {char.name}({char.role})"]
+        lines = [f"【{char.name}（{char.role}）】"]
         if char.identity:
-            lines.append(f"  身份: {char.identity}")
-        if char.personality:
-            lines.append(f"  性格: {char.personality}")
+            lines.append(f"身份: {char.identity}")
         if char.golden_finger:
-            lines.append(f"  金手指: {char.golden_finger}")
+            lines.append(f"金手指: {char.golden_finger}")
         if char.current_status:
-            lines.append(f"  当前状态: {char.current_status}")
+            lines.append(f"当前状态: {char.current_status}")
         if char.current_location:
-            lines.append(f"  当前位置: {char.current_location}")
-        if char.emotional_state:
-            lines.append(f"  情绪: {char.emotional_state}")
+            lines.append(f"当前位置: {char.current_location}")
+        if char.personality_tags:
+            lines.append(f"核心性格: {' + '.join(char.personality_tags)}")
+        elif char.personality:
+            lines.append(f"性格: {char.personality}")
+        if char.motivation:
+            lines.append(f"当前动机: {char.motivation}")
+        if char.behavior_rules:
+            rules = char.behavior_rules
+            if rules.get("absolute_do"):
+                lines.append("一定会做:")
+                for r in rules["absolute_do"]:
+                    lines.append(f"  - {r}")
+            if rules.get("absolute_dont"):
+                lines.append("绝对不做:")
+                for r in rules["absolute_dont"]:
+                    lines.append(f"  - {r}")
+        if char.speech_pattern:
+            lines.append(f"说话风格: {char.speech_pattern}")
+        if char.relationship_masks:
+            lines.append("对不同人的态度:")
+            for target, mask in char.relationship_masks.items():
+                lines.append(f"  - 对{target}: {mask}")
         return "\n".join(lines)
 
     async def _build_foreshadowing_context(

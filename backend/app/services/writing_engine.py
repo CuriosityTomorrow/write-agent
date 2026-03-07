@@ -535,8 +535,17 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
         for f in fs_result.scalars().all()
     ]
 
+    # 构建角色行为准则（用于一致性检查）
+    char_behavior_rules = {}
+    for c in characters:
+        if c.behavior_rules:
+            char_behavior_rules[c.name] = c.behavior_rules
+
     provider = get_provider(model_id)
-    prompt = intel_extractor.build_intel_prompt(chapter.content, char_names, active_foreshadowings)
+    prompt = intel_extractor.build_intel_prompt(
+        chapter.content, char_names, active_foreshadowings,
+        character_behavior_rules=char_behavior_rules if char_behavior_rules else None,
+    )
     response = await provider.generate_complete(
         messages=[Message(role="user", content=prompt)],
         system_prompt=intel_extractor.SYSTEM_PROMPT,
@@ -555,6 +564,7 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
         timeline_events=intel_data.get("timeline_events"),
         next_chapter_required_chars=intel_data.get("next_chapter_required_chars"),
         suggested_foreshadowings=intel_data.get("suggested_foreshadowings"),
+        character_consistency=intel_data.get("character_consistency"),
     )
     db.add(intel)
 
