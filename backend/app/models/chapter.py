@@ -19,6 +19,7 @@ class Chapter(Base):
     actual_word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="草稿")
     conflict_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chapter_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -52,6 +53,7 @@ class ChapterIntel(Base):
     timeline_events: Mapped[list | None] = mapped_column(JSON, nullable=True)
     next_chapter_required_chars: Mapped[list | None] = mapped_column(JSON, nullable=True)
     suggested_foreshadowings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    character_consistency: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="intel")

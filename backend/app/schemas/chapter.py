@@ -6,6 +6,7 @@ class ChapterCreate(BaseModel):
     chapter_outline: str | None = None
     target_word_count: int | None = 3000
     conflict_description: str | None = None
+    chapter_type: str | None = None
     required_character_ids: list[int] | None = None
     optional_character_ids: list[int] | None = None
     foreshadowing_ids: list[int] | None = None
@@ -17,6 +18,7 @@ class ChapterUpdate(BaseModel):
     chapter_outline: str | None = None
     status: str | None = None
     conflict_description: str | None = None
+    chapter_type: str | None = None
 
 
 class ChapterResponse(BaseModel):
@@ -30,6 +32,7 @@ class ChapterResponse(BaseModel):
     actual_word_count: int | None = None
     status: str
     conflict_description: str | None = None
+    chapter_type: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -47,6 +50,7 @@ class ChapterIntelResponse(BaseModel):
     timeline_events: list | None = None
     next_chapter_required_chars: list | None = None
     suggested_foreshadowings: list | None = None
+    character_consistency: list | None = None
 
     model_config = {"from_attributes": True}
 
