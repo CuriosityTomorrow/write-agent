@@ -35,7 +35,7 @@ def compute_foreshadowing_urgency(current_chapter: int, fs) -> tuple[str, str]:
 
 
 class ContextBuilder:
-    """为章节生成组装完整的上下文信息（分层记忆 P0-P6）"""
+    """为章节生成组装完整的上下文信息（分层记忆 P0-P7）"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -49,7 +49,7 @@ class ContextBuilder:
         foreshadowing_ids: list[int] | None = None,
         max_context_tokens: int = 128000,
     ) -> dict:
-        """分层组装写作上下文，按优先级 P0-P6"""
+        """分层组装写作上下文，按优先级 P0-P7"""
         novel = await self.db.get(Novel, novel_id)
         token_budget = int(max_context_tokens * 0.25)
         used_tokens = 0
@@ -89,6 +89,14 @@ class ContextBuilder:
         else:
             layers["summary_intel"] = ""
 
+        # P5.5: 前16-30章关键事件
+        p5_5 = await self._build_key_events(novel_id, chapter_number)
+        if p5_5 and used_tokens + estimate_tokens(p5_5) <= token_budget:
+            layers["key_events"] = p5_5
+            used_tokens += estimate_tokens(p5_5)
+        else:
+            layers["key_events"] = ""
+
         # P6: 可选角色 + 角色关系
         p6 = await self._build_character_context(novel_id, [], optional_char_ids)
         if used_tokens + estimate_tokens(p6) <= token_budget:
@@ -96,6 +104,14 @@ class ContextBuilder:
             used_tokens += estimate_tokens(p6)
         else:
             layers["optional_characters"] = ""
+
+        # P7: 卷摘要
+        p7 = await self._build_volume_summaries(novel_id, chapter_number)
+        if p7 and used_tokens + estimate_tokens(p7) <= token_budget:
+            layers["volume_summaries"] = p7
+            used_tokens += estimate_tokens(p7)
+        else:
+            layers["volume_summaries"] = ""
 
         layers["blueprint_context"] = await self._build_blueprint_context(novel)
         layers["style_prompt"] = await self._build_style_prompt(novel)
@@ -291,6 +307,84 @@ class ContextBuilder:
             if intel and intel.plot_summary:
                 parts.append(f"第{ch.chapter_number}章摘要: {intel.plot_summary}")
         return "\n".join(parts) if parts else ""
+
+    async def _build_key_events(self, novel_id: int, current_chapter_number: int) -> str:
+        """P5.5: 前16-30章，每章一个关键事件（plot_summary 第一句）"""
+        result = await self.db.execute(
+            select(Chapter)
+            .where(
+                Chapter.novel_id == novel_id,
+                Chapter.chapter_number < current_chapter_number - 15,
+                Chapter.chapter_number >= current_chapter_number - 30,
+            )
+            .order_by(Chapter.chapter_number)
+        )
+        chapters = result.scalars().all()
+        if not chapters:
+            return ""
+        parts = []
+        for ch in chapters:
+            intel_result = await self.db.execute(
+                select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
+            )
+            intel = intel_result.scalar_one_or_none()
+            if intel and intel.plot_summary:
+                first_sentence = intel.plot_summary.split("。")[0] + "。"
+                parts.append(f"第{ch.chapter_number}章: {first_sentence}")
+        return "\n".join(parts) if parts else ""
+
+    async def _build_volume_summaries(self, novel_id: int, chapter_number: int) -> str:
+        """P7: 加载卷摘要（P7a近期 + P7b弧摘要 + P7c全书纲要）"""
+        from app.models.narrative_memory import NarrativeMemory
+
+        parts = []
+
+        # P7c: 全书纲要（最多1条）
+        result = await self.db.execute(
+            select(NarrativeMemory).where(
+                NarrativeMemory.novel_id == novel_id,
+                NarrativeMemory.memory_type == "global",
+            )
+        )
+        global_mem = result.scalar_one_or_none()
+        if global_mem:
+            parts.append(f"【全书纲要（第{global_mem.chapter_start}-{global_mem.chapter_end}章）】\n{global_mem.plot_progression}")
+
+        # P7b: 弧摘要
+        result = await self.db.execute(
+            select(NarrativeMemory)
+            .where(
+                NarrativeMemory.novel_id == novel_id,
+                NarrativeMemory.memory_type == "arc",
+            )
+            .order_by(NarrativeMemory.chapter_start)
+        )
+        for arc in result.scalars().all():
+            parts.append(f"【弧摘要（第{arc.chapter_start}-{arc.chapter_end}章）】\n{arc.plot_progression}")
+
+        # P7a: 最近3个卷摘要
+        result = await self.db.execute(
+            select(NarrativeMemory)
+            .where(
+                NarrativeMemory.novel_id == novel_id,
+                NarrativeMemory.memory_type == "volume",
+            )
+            .order_by(NarrativeMemory.chapter_end.desc())
+            .limit(3)
+        )
+        recent_volumes = list(reversed(result.scalars().all()))
+        for vol in recent_volumes:
+            vol_parts = [f"【卷摘要（第{vol.chapter_start}-{vol.chapter_end}章）】"]
+            vol_parts.append(f"情节: {vol.plot_progression}")
+            if vol.character_states:
+                for name, state in vol.character_states.items():
+                    state_str = ", ".join(f"{k}: {v}" for k, v in state.items()) if isinstance(state, dict) else str(state)
+                    vol_parts.append(f"  {name}: {state_str}")
+            if vol.unresolved_threads:
+                vol_parts.append(f"未解决线索: {'、'.join(vol.unresolved_threads)}")
+            parts.append("\n".join(vol_parts))
+
+        return "\n\n".join(parts) if parts else ""
 
     async def _build_blueprint_context(self, novel: Novel) -> str:
         if not novel.selected_blueprint_id:
