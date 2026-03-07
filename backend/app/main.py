@@ -46,6 +46,10 @@ from app.api.export import router as export_router
 
 app.include_router(export_router)
 
+from app.api.narrative_memory import router as narrative_memory_router
+
+app.include_router(narrative_memory_router)
+
 
 @app.get("/health")
 async def health():
