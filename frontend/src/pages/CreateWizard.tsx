@@ -41,6 +41,8 @@ export default function CreateWizard() {
 
   // AI generate creative idea
   const [ideaLoading, setIdeaLoading] = useState(false)
+  const [showIdeaPrompt, setShowIdeaPrompt] = useState(false)
+  const [ideaPrompt, setIdeaPrompt] = useState('')
 
   const handleGenerateCreativeIdea = async () => {
     if (!selectedModel) { alert('请先选择 AI 模型'); return }
@@ -51,10 +53,12 @@ export default function CreateWizard() {
         current_value: creativeIdea,
         creative_idea: creativeIdea || `一部${genre}类型的${mode}网文`,
         genre,
-        suggestion: '',
+        suggestion: ideaPrompt,
         model_id: selectedModel,
       })
       setCreativeIdea(res.data.value)
+      setShowIdeaPrompt(false)
+      setIdeaPrompt('')
     } catch { alert('生成失败，请重试') }
     setIdeaLoading(false)
   }
@@ -307,13 +311,31 @@ export default function CreateWizard() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">输入你的创意想法</h2>
               <button
-                onClick={handleGenerateCreativeIdea}
+                onClick={() => { showIdeaPrompt ? handleGenerateCreativeIdea() : setShowIdeaPrompt(true) }}
                 disabled={ideaLoading}
                 className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 disabled:opacity-50"
               >
-                {ideaLoading ? 'AI 思考中...' : 'AI 帮我想'}
+                {ideaLoading ? 'AI 思考中...' : showIdeaPrompt ? '确认生成' : 'AI 帮我想'}
               </button>
             </div>
+            {showIdeaPrompt && (
+              <div className="mb-3 flex gap-2">
+                <input
+                  value={ideaPrompt}
+                  onChange={e => setIdeaPrompt(e.target.value)}
+                  placeholder="给 AI 一些方向提示，如：丧尸末日、系统流、都市求生..."
+                  className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  onKeyDown={e => { if (e.key === 'Enter') handleGenerateCreativeIdea() }}
+                  autoFocus
+                />
+                <button
+                  onClick={() => { setShowIdeaPrompt(false); setIdeaPrompt('') }}
+                  className="text-xs text-gray-500 hover:text-gray-700 px-2"
+                >
+                  取消
+                </button>
+              </div>
+            )}
             <textarea
               value={creativeIdea}
               onChange={e => setCreativeIdea(e.target.value)}
