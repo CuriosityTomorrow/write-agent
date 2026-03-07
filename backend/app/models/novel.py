@@ -37,6 +37,7 @@ class Novel(Base):
     chapters = relationship("Chapter", back_populates="novel", cascade="all, delete-orphan", order_by="Chapter.chapter_number")
     outline = relationship("Outline", back_populates="novel", uselist=False, cascade="all, delete-orphan")
     foreshadowings = relationship("Foreshadowing", back_populates="novel", cascade="all, delete-orphan")
+    narrative_memories = relationship("NarrativeMemory", back_populates="novel", cascade="all, delete-orphan")
 
 
 class Outline(Base):
