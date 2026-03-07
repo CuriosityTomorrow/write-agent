@@ -50,6 +50,10 @@ from app.api.narrative_memory import router as narrative_memory_router
 
 app.include_router(narrative_memory_router)
 
+from app.api.major_events import router as major_events_router
+
+app.include_router(major_events_router)
+
 
 @app.get("/health")
 async def health():
