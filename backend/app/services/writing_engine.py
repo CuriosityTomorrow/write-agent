@@ -12,7 +12,67 @@ from app.models import (
 )
 from app.models.narrative_memory import NarrativeMemory
 from app.prompts import idea_generator, outline_generator, chapter_generator, intel_extractor, volume_compressor
+from app.prompts.presets import get_preset
 from app.services.memory_system import ContextBuilder
+
+
+def _parse_chapter_range(chapter_range: str) -> tuple[int, int]:
+    """解析 '第90-95章' 格式为 (90, 95)"""
+    m = re.search(r'(\d+)\s*[-~]\s*(\d+)', chapter_range)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.search(r'(\d+)', chapter_range)
+    if m:
+        n = int(m.group(1))
+        return n, n
+    return 0, 0
+
+
+def assign_chapter_type(chapter_number: int, plot_points: list | None, genre: str) -> str:
+    """根据大事件覆盖或六章周期分配章节类型"""
+    # 1. 检查大事件覆盖
+    for pp in (plot_points or []):
+        if not isinstance(pp, dict) or pp.get("event_scale") != "major":
+            continue
+        target_start, target_end = _parse_chapter_range(pp.get("chapter_range", ""))
+        if target_start <= 0:
+            continue
+        # 爆发阶段
+        if target_start <= chapter_number <= target_end:
+            return "climax"
+        # 临场紧张（爆发前5章）
+        if target_start - 5 <= chapter_number < target_start:
+            return "transition"
+        # 铺垫阶段
+        buildup_start = pp.get("buildup_start_chapter", target_start - 30)
+        if buildup_start <= chapter_number < target_start - 5:
+            return "setup"
+
+    # 2. 六章周期
+    preset = get_preset(genre)
+    pattern = preset["pacing"]["cycle_pattern"]
+    cycle_pos = (chapter_number - 1) % len(pattern)
+    return pattern[cycle_pos]
+
+
+def build_pacing_instruction(chapter_type: str, genre: str) -> str:
+    """根据章节类型生成节奏指令文本"""
+    preset = get_preset(genre)
+    config = preset["pacing"]["chapter_types"].get(chapter_type)
+    if not config:
+        return ""
+    return f"""本章类型：{chapter_type}（{config['description']}）
+
+写作约束：
+- 主要事件：不超过 {config['main_events']} 个，每个事件必须充分展开
+- 次要事件：不超过 {config['sub_events']} 个
+- 场景切换：最多 {config['scene_changes_max']} 次
+- 细节重点：{config['detail_focus']}
+- 章末处理：{config['hook']}
+
+⚠️ 宁可把一个事件写深写透，也不要塞太多事件。
+   角色的反应、对话、心理活动、环境描写都需要充分展开。
+   参考标准：每个主事件至少需要 800-1000 字的篇幅来展开。"""
 
 
 def _parse_json(text: str) -> dict:
@@ -385,6 +445,18 @@ async def generate_chapter_stream(
         max_context_tokens=max_context,
     )
 
+    # 获取小说信息和大纲（用于节奏控制）
+    novel = await db.get(Novel, novel_id)
+    outline_result = await db.execute(select(Outline).where(Outline.novel_id == novel_id))
+    outline = outline_result.scalar_one_or_none()
+    plot_points = outline.plot_points if outline else None
+
+    # 确定章节类型
+    effective_type = chapter.chapter_type or assign_chapter_type(
+        chapter.chapter_number, plot_points, novel.genre
+    )
+    pacing_instruction = build_pacing_instruction(effective_type, novel.genre)
+
     # 组装本章配置
     chapter_config_parts = [f"章节序号: 第{chapter.chapter_number}章"]
     if chapter.chapter_outline:
@@ -395,9 +467,13 @@ async def generate_chapter_stream(
         chapter_config_parts.append(f"目标字数: {chapter.target_word_count}字")
 
     # 构建完整 prompt
+    preset = get_preset(novel.genre)
+    preset_addon = preset.get("system_prompt_addon", "")
     style_instruction = ""
     if ctx["style_prompt"]:
         style_instruction = f"\n\n【文笔风格要求】\n{ctx['style_prompt']}"
+    if preset_addon:
+        style_instruction += f"\n\n{preset_addon}"
 
     system_prompt = chapter_generator.SYSTEM_PROMPT_TEMPLATE.format(style_instruction=style_instruction)
 
@@ -413,6 +489,9 @@ async def generate_chapter_stream(
         optional_characters=ctx["optional_characters"],
         rewrite_content=chapter.content if suggestion else "",
         rewrite_suggestion=suggestion,
+        pacing_instruction=pacing_instruction,
+        key_events=ctx.get("key_events", ""),
+        volume_summaries=ctx.get("volume_summaries", ""),
     )
     full_content = ""
     async for chunk in provider.generate(
