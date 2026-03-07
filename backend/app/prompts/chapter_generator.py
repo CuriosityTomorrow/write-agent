@@ -28,10 +28,15 @@ def build_chapter_prompt(
     optional_characters: str = "",
     rewrite_content: str = "",
     rewrite_suggestion: str = "",
+    pacing_instruction: str = "",
+    key_events: str = "",
+    volume_summaries: str = "",
 ) -> str:
     sections = [
         f"【小说信息】\n{novel_info}",
     ]
+    if volume_summaries:
+        sections.append(f"【历史记忆】\n{volume_summaries}")
     if previous_chapters:
         sections.append(f"【前文原文】\n{previous_chapters}")
     sections.append(f"【本章涉及角色】\n{character_context}")
@@ -41,10 +46,14 @@ def build_chapter_prompt(
         sections.append(f"【近期章节情报（第3-5章）】\n{recent_intel}")
     if summary_intel:
         sections.append(f"【早期章节摘要（第6-15章）】\n{summary_intel}")
+    if key_events:
+        sections.append(f"【关键事件回顾（第16-30章）】\n{key_events}")
     if foreshadowing_context:
         sections.append(f"【伏笔追踪】\n{foreshadowing_context}")
     if blueprint_context:
         sections.append(f"【叙事节奏指导】\n{blueprint_context}")
+    if pacing_instruction:
+        sections.append(f"【节奏控制】\n{pacing_instruction}")
     sections.append(f"【本章要求】\n{chapter_config}")
 
     if rewrite_content and rewrite_suggestion:
