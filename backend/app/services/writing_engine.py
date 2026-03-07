@@ -10,7 +10,8 @@ from app.llm import get_provider, Message, GenerateConfig
 from app.models import (
     Novel, Character, Chapter, ChapterIntel, ChapterCharacter, Foreshadowing, Outline,
 )
-from app.prompts import idea_generator, outline_generator, chapter_generator, intel_extractor
+from app.models.narrative_memory import NarrativeMemory
+from app.prompts import idea_generator, outline_generator, chapter_generator, intel_extractor, volume_compressor
 from app.services.memory_system import ContextBuilder
 
 
@@ -526,5 +527,147 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
         )
         db.add(fs)
 
+    # 自动压缩检查
+    await _maybe_auto_compress(chapter.novel_id, chapter.chapter_number, model_id, db)
+
     await db.commit()
     return intel_data
+
+
+async def generate_volume_summary(
+    novel_id: int,
+    chapter_start: int,
+    chapter_end: int,
+    model_id: str,
+    db: AsyncSession,
+) -> dict:
+    """生成指定章节范围的卷摘要"""
+    result = await db.execute(
+        select(Chapter)
+        .where(
+            Chapter.novel_id == novel_id,
+            Chapter.chapter_number >= chapter_start,
+            Chapter.chapter_number <= chapter_end,
+        )
+        .order_by(Chapter.chapter_number)
+    )
+    chapters = result.scalars().all()
+
+    intels_parts = []
+    for ch in chapters:
+        intel_result = await db.execute(
+            select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
+        )
+        intel = intel_result.scalar_one_or_none()
+        if intel:
+            parts = [f"第{ch.chapter_number}章 {ch.title or ''}:"]
+            parts.append(f"  情节: {intel.plot_summary or ''}")
+            if intel.character_updates:
+                for cu in intel.character_updates:
+                    parts.append(f"  角色: {cu.get('name', '')} - {cu.get('status_change', '')}")
+            if intel.relationship_changes:
+                for rc in intel.relationship_changes:
+                    parts.append(f"  关系: {rc.get('char_a', '')}↔{rc.get('char_b', '')}: {rc.get('change', '')}")
+            intels_parts.append("\n".join(parts))
+
+    if not intels_parts:
+        raise ValueError(f"No intel found for chapters {chapter_start}-{chapter_end}")
+
+    intels_text = "\n\n".join(intels_parts)
+
+    provider = get_provider(model_id)
+    prompt = volume_compressor.build_volume_compress_prompt(intels_text, chapter_start, chapter_end)
+    response = await provider.generate_complete(
+        messages=[Message(role="user", content=prompt)],
+        system_prompt=volume_compressor.SYSTEM_PROMPT,
+        config=GenerateConfig(temperature=0.3, max_tokens=3000, stream=False),
+    )
+    summary_data = _parse_json(response)
+
+    # 检查是否已存在同范围的摘要
+    existing = await db.execute(
+        select(NarrativeMemory).where(
+            NarrativeMemory.novel_id == novel_id,
+            NarrativeMemory.memory_type == "volume",
+            NarrativeMemory.chapter_start == chapter_start,
+            NarrativeMemory.chapter_end == chapter_end,
+        )
+    )
+    mem = existing.scalar_one_or_none()
+    if mem:
+        mem.plot_progression = summary_data.get("plot_progression", "")
+        mem.character_states = summary_data.get("character_states")
+        mem.relationship_changes = summary_data.get("relationship_changes")
+        mem.unresolved_threads = summary_data.get("unresolved_threads")
+        mem.world_state_changes = summary_data.get("world_state_changes")
+    else:
+        mem = NarrativeMemory(
+            novel_id=novel_id,
+            memory_type="volume",
+            chapter_start=chapter_start,
+            chapter_end=chapter_end,
+            plot_progression=summary_data.get("plot_progression", ""),
+            character_states=summary_data.get("character_states"),
+            relationship_changes=summary_data.get("relationship_changes"),
+            unresolved_threads=summary_data.get("unresolved_threads"),
+            world_state_changes=summary_data.get("world_state_changes"),
+        )
+        db.add(mem)
+
+    await db.commit()
+    return summary_data
+
+
+async def _maybe_auto_compress(novel_id: int, chapter_number: int, model_id: str, db: AsyncSession):
+    """在 intel 提取后自动检查是否需要生成卷摘要/弧摘要"""
+    # 每30章生成一次卷摘要
+    if chapter_number % 30 == 0:
+        volume_start = chapter_number - 29
+        existing = await db.execute(
+            select(NarrativeMemory).where(
+                NarrativeMemory.novel_id == novel_id,
+                NarrativeMemory.memory_type == "volume",
+                NarrativeMemory.chapter_start == volume_start,
+            )
+        )
+        if not existing.scalar_one_or_none():
+            await generate_volume_summary(novel_id, volume_start, chapter_number, model_id, db)
+
+    # 每150章生成一次弧摘要
+    if chapter_number % 150 == 0:
+        arc_start = chapter_number - 149
+        result = await db.execute(
+            select(NarrativeMemory).where(
+                NarrativeMemory.novel_id == novel_id,
+                NarrativeMemory.memory_type == "volume",
+                NarrativeMemory.chapter_start >= arc_start,
+                NarrativeMemory.chapter_end <= chapter_number,
+            ).order_by(NarrativeMemory.chapter_start)
+        )
+        volumes = result.scalars().all()
+        if volumes:
+            summaries_text = "\n\n".join(
+                f"第{v.chapter_start}-{v.chapter_end}章:\n{v.plot_progression}"
+                for v in volumes
+            )
+            provider = get_provider(model_id)
+            prompt = volume_compressor.build_arc_compress_prompt(summaries_text, arc_start, chapter_number)
+            response = await provider.generate_complete(
+                messages=[Message(role="user", content=prompt)],
+                system_prompt=volume_compressor.SYSTEM_PROMPT,
+                config=GenerateConfig(temperature=0.3, max_tokens=2000, stream=False),
+            )
+            arc_data = _parse_json(response)
+            arc_mem = NarrativeMemory(
+                novel_id=novel_id,
+                memory_type="arc",
+                chapter_start=arc_start,
+                chapter_end=chapter_number,
+                plot_progression=arc_data.get("plot_progression", ""),
+                character_states=arc_data.get("character_states"),
+                relationship_changes=arc_data.get("relationship_changes"),
+                unresolved_threads=arc_data.get("unresolved_threads"),
+                world_state_changes=arc_data.get("world_state_changes"),
+            )
+            db.add(arc_mem)
+            await db.commit()
