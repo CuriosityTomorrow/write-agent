@@ -41,6 +41,17 @@ export const regenerateNovelField = (novelId: number, data: any) => api.post(`/n
 export const generateOutline = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/outline`, data)
 export const extractIntel = (novelId: number, chapterId: number, data: any) => api.post(`/novels/${novelId}/chapters/${chapterId}/extract-intel`, data)
 
+// Narrative Memory
+export const listNarrativeMemories = (novelId: number) => api.get(`/novels/${novelId}/narrative-memories`)
+export const updateNarrativeMemory = (novelId: number, memId: number, data: any) => api.put(`/novels/${novelId}/narrative-memories/${memId}`, data)
+export const generateVolumeSummary = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/volume-summary`, data)
+export const generateRangeSummary = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/range-summary`, data)
+
+// Major Events
+export const listMajorEvents = (novelId: number) => api.get(`/novels/${novelId}/major-events`)
+export const generateMajorEventIdeas = (novelId: number, data: any) => api.post(`/novels/${novelId}/major-events/generate-ideas`, data)
+export const createMajorEvent = (novelId: number, data: any) => api.post(`/novels/${novelId}/major-events`, data)
+
 // LLM
 export const getModels = () => api.get('/llm/models')
 
