@@ -6,6 +6,8 @@ import {
   listForeshadowings, createCharacter, createChapter, deleteChapter, updateCharacter,
   updateOutline, regenerateNovelField, getModels, exportTxt,
   createForeshadowing,
+  listNarrativeMemories, generateVolumeSummary,
+  listMajorEvents, generateMajorEventIdeas, createMajorEvent, generateRangeSummary,
 } from '../services/api'
 
 export default function NovelDetail() {
@@ -13,7 +15,7 @@ export default function NovelDetail() {
   const novelId = Number(id)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'outline' | 'characters' | 'chapters' | 'foreshadowings'>('chapters')
+  const [activeTab, setActiveTab] = useState<'outline' | 'characters' | 'chapters' | 'foreshadowings' | 'memories' | 'majorEvents'>('chapters')
   const [showNewChar, setShowNewChar] = useState(false)
   const [newCharName, setNewCharName] = useState('')
   const [newCharRole, setNewCharRole] = useState('配角')
@@ -56,6 +58,29 @@ export default function NovelDetail() {
   const [editingCharId, setEditingCharId] = useState<number | null>(null)
   const [editChar, setEditChar] = useState<any>(null)
   const [charSaving, setCharSaving] = useState(false)
+  const [charDriverExpanded, setCharDriverExpanded] = useState(false)
+
+  // Task 16: Volume Summaries
+  const [volSumChapterStart, setVolSumChapterStart] = useState<number | ''>(1)
+  const [volSumChapterEnd, setVolSumChapterEnd] = useState<number | ''>(10)
+  const [volSumLoading, setVolSumLoading] = useState(false)
+  const [memoryExpanded, setMemoryExpanded] = useState<number | null>(null)
+
+  // Task 19: Major Events
+  const [majorEventExpanded, setMajorEventExpanded] = useState<number | null>(null)
+  const [showMajorEventCreate, setShowMajorEventCreate] = useState(false)
+  const [meChapterStart, setMeChapterStart] = useState<number | ''>(1)
+  const [meChapterEnd, setMeChapterEnd] = useState<number | ''>(10)
+  const [meRangeSummary, setMeRangeSummary] = useState('')
+  const [meRangeSummaryLoading, setMeRangeSummaryLoading] = useState(false)
+  const [meSuggestions, setMeSuggestions] = useState<any[]>([])
+  const [meSuggestionsLoading, setMeSuggestionsLoading] = useState(false)
+  const [meTitle, setMeTitle] = useState('')
+  const [meDescription, setMeDescription] = useState('')
+  const [meTargetChapters, setMeTargetChapters] = useState('')
+  const [meBuildupStart, setMeBuildupStart] = useState<number | ''>(1)
+  const [meCreating, setMeCreating] = useState(false)
+  const [meCreateResult, setMeCreateResult] = useState<any>(null)
 
   const { data: novel } = useQuery({ queryKey: ['novel', novelId], queryFn: () => getNovel(novelId).then(r => r.data) })
   const { data: outline } = useQuery({ queryKey: ['outline', novelId], queryFn: () => getOutline(novelId).then(r => r.data) })
@@ -177,7 +202,19 @@ export default function NovelDetail() {
       personality: c.personality || '',
       background: c.background || '',
       golden_finger: c.golden_finger || '',
+      personality_tags: Array.isArray(c.personality_tags) ? c.personality_tags.join(', ') : (c.personality_tags || ''),
+      motivation: c.motivation || '',
+      behavior_rules_do: Array.isArray(c.behavior_rules?.absolute_do) ? c.behavior_rules.absolute_do.join('\n') : '',
+      behavior_rules_dont: Array.isArray(c.behavior_rules?.absolute_dont) ? c.behavior_rules.absolute_dont.join('\n') : '',
+      speech_pattern: c.speech_pattern || '',
+      growth_arc_type: c.growth_arc_type || '',
+      relationship_masks: c.relationship_masks
+        ? (typeof c.relationship_masks === 'object'
+          ? Object.entries(c.relationship_masks).map(([k, v]) => `${k}: ${v}`).join('\n')
+          : c.relationship_masks)
+        : '',
     })
+    setCharDriverExpanded(false)
   }
 
   const cancelEditChar = () => {
@@ -189,7 +226,37 @@ export default function NovelDetail() {
     if (!editChar || !editingCharId) return
     setCharSaving(true)
     try {
-      await updateCharacter(novelId, editingCharId, editChar)
+      const personalityTags = editChar.personality_tags
+        ? editChar.personality_tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+        : []
+      const behaviorRules = {
+        absolute_do: editChar.behavior_rules_do ? editChar.behavior_rules_do.split('\n').map((l: string) => l.trim()).filter(Boolean) : [],
+        absolute_dont: editChar.behavior_rules_dont ? editChar.behavior_rules_dont.split('\n').map((l: string) => l.trim()).filter(Boolean) : [],
+      }
+      const relationshipMasks: Record<string, string> = {}
+      if (editChar.relationship_masks) {
+        editChar.relationship_masks.split('\n').forEach((line: string) => {
+          const idx = line.indexOf(':')
+          if (idx > 0) {
+            relationshipMasks[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+          }
+        })
+      }
+      const payload = {
+        name: editChar.name,
+        role: editChar.role,
+        identity: editChar.identity,
+        personality: editChar.personality,
+        background: editChar.background,
+        golden_finger: editChar.golden_finger,
+        personality_tags: personalityTags,
+        motivation: editChar.motivation,
+        behavior_rules: behaviorRules,
+        speech_pattern: editChar.speech_pattern,
+        growth_arc_type: editChar.growth_arc_type || null,
+        relationship_masks: relationshipMasks,
+      }
+      await updateCharacter(novelId, editingCharId, payload)
       queryClient.invalidateQueries({ queryKey: ['characters', novelId] })
       setEditingCharId(null)
       setEditChar(null)
@@ -204,6 +271,8 @@ export default function NovelDetail() {
     { key: 'outline', label: '大纲' },
     { key: 'characters', label: '角色' },
     { key: 'foreshadowings', label: '伏笔追踪' },
+    { key: 'memories', label: '卷摘要' },
+    { key: 'majorEvents', label: '大事件' },
   ] as const
 
   return (
@@ -582,6 +651,53 @@ export default function NovelDetail() {
                       <label className="text-xs text-gray-500">金手指</label>
                       <textarea value={editChar.golden_finger} onChange={e => setEditChar((prev: any) => ({ ...prev, golden_finger: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} placeholder="金手指/特殊能力" />
                     </div>
+                    {/* Task 18: Collapsible character driver section */}
+                    <div className="border-t pt-2 mt-2">
+                      <button
+                        onClick={() => setCharDriverExpanded(!charDriverExpanded)}
+                        className="text-xs text-purple-600 hover:text-purple-800 font-medium"
+                      >
+                        {charDriverExpanded ? '收起角色驱动设定 ▲' : '展开角色驱动设定 ▼'}
+                      </button>
+                      {charDriverExpanded && (
+                        <div className="space-y-2 mt-2">
+                          <div>
+                            <label className="text-xs text-gray-500">性格标签（逗号分隔）</label>
+                            <input value={editChar.personality_tags} onChange={e => setEditChar((prev: any) => ({ ...prev, personality_tags: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm" placeholder="例：冷静, 果断, 腹黑" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">动机</label>
+                            <textarea value={editChar.motivation} onChange={e => setEditChar((prev: any) => ({ ...prev, motivation: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} placeholder="角色的核心驱动力" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">行为准则 — 一定会做（每行一条）</label>
+                            <textarea value={editChar.behavior_rules_do} onChange={e => setEditChar((prev: any) => ({ ...prev, behavior_rules_do: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} placeholder="保护同伴&#10;信守承诺" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">行为准则 — 绝对不做（每行一条）</label>
+                            <textarea value={editChar.behavior_rules_dont} onChange={e => setEditChar((prev: any) => ({ ...prev, behavior_rules_dont: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} placeholder="背叛朋友&#10;伤害无辜" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">语言风格</label>
+                            <textarea value={editChar.speech_pattern} onChange={e => setEditChar((prev: any) => ({ ...prev, speech_pattern: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} placeholder="描述角色的说话方式、口头禅等" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">成长弧线类型</label>
+                            <select value={editChar.growth_arc_type} onChange={e => setEditChar((prev: any) => ({ ...prev, growth_arc_type: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm">
+                              <option value="">未设定</option>
+                              <option value="staircase">阶梯型 (staircase)</option>
+                              <option value="spiral">螺旋型 (spiral)</option>
+                              <option value="cliff">断崖型 (cliff)</option>
+                              <option value="platform">平台型 (platform)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500">关系面具（每行一条，格式：名字: 态度）</label>
+                            <textarea value={editChar.relationship_masks} onChange={e => setEditChar((prev: any) => ({ ...prev, relationship_masks: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={3} placeholder="张三: 表面恭敬，内心警惕&#10;李四: 真心信赖" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <div className="flex gap-2 pt-1">
                       <button onClick={saveChar} disabled={charSaving} className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50">
                         {charSaving ? '保存中...' : '保存'}
@@ -713,6 +829,422 @@ export default function NovelDetail() {
           </div>
         </div>
       )}
+
+      {/* Task 16: Volume Summaries tab */}
+      {activeTab === 'memories' && <MemoriesTab
+        novelId={novelId}
+        selectedModel={selectedModel}
+        models={models}
+        setSelectedModel={setSelectedModel}
+        volSumChapterStart={volSumChapterStart}
+        setVolSumChapterStart={setVolSumChapterStart}
+        volSumChapterEnd={volSumChapterEnd}
+        setVolSumChapterEnd={setVolSumChapterEnd}
+        volSumLoading={volSumLoading}
+        setVolSumLoading={setVolSumLoading}
+        memoryExpanded={memoryExpanded}
+        setMemoryExpanded={setMemoryExpanded}
+        queryClient={queryClient}
+      />}
+
+      {/* Task 19: Major Events tab */}
+      {activeTab === 'majorEvents' && <MajorEventsTab
+        novelId={novelId}
+        selectedModel={selectedModel}
+        models={models}
+        setSelectedModel={setSelectedModel}
+        majorEventExpanded={majorEventExpanded}
+        setMajorEventExpanded={setMajorEventExpanded}
+        showMajorEventCreate={showMajorEventCreate}
+        setShowMajorEventCreate={setShowMajorEventCreate}
+        meChapterStart={meChapterStart}
+        setMeChapterStart={setMeChapterStart}
+        meChapterEnd={meChapterEnd}
+        setMeChapterEnd={setMeChapterEnd}
+        meRangeSummary={meRangeSummary}
+        setMeRangeSummary={setMeRangeSummary}
+        meRangeSummaryLoading={meRangeSummaryLoading}
+        setMeRangeSummaryLoading={setMeRangeSummaryLoading}
+        meSuggestions={meSuggestions}
+        setMeSuggestions={setMeSuggestions}
+        meSuggestionsLoading={meSuggestionsLoading}
+        setMeSuggestionsLoading={setMeSuggestionsLoading}
+        meTitle={meTitle}
+        setMeTitle={setMeTitle}
+        meDescription={meDescription}
+        setMeDescription={setMeDescription}
+        meTargetChapters={meTargetChapters}
+        setMeTargetChapters={setMeTargetChapters}
+        meBuildupStart={meBuildupStart}
+        setMeBuildupStart={setMeBuildupStart}
+        meCreating={meCreating}
+        setMeCreating={setMeCreating}
+        meCreateResult={meCreateResult}
+        setMeCreateResult={setMeCreateResult}
+        queryClient={queryClient}
+      />}
+    </div>
+  )
+}
+
+/* =====================================================
+   Task 16: Volume Summaries (卷摘要) Tab Component
+   ===================================================== */
+function MemoriesTab({ novelId, selectedModel, models, setSelectedModel, volSumChapterStart, setVolSumChapterStart, volSumChapterEnd, setVolSumChapterEnd, volSumLoading, setVolSumLoading, memoryExpanded, setMemoryExpanded, queryClient }: any) {
+  const { data: memories } = useQuery({
+    queryKey: ['narrativeMemories', novelId],
+    queryFn: () => listNarrativeMemories(novelId).then(r => r.data),
+  })
+
+  const grouped = {
+    global: (memories || []).filter((m: any) => m.type === 'global'),
+    arc: (memories || []).filter((m: any) => m.type === 'arc'),
+    volume: (memories || []).filter((m: any) => m.type === 'volume'),
+  }
+
+  const typeBadge = (type: string) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      global: { label: '全局', cls: 'bg-purple-100 text-purple-700' },
+      arc: { label: '弧', cls: 'bg-blue-100 text-blue-700' },
+      volume: { label: '卷', cls: 'bg-green-100 text-green-700' },
+    }
+    const info = map[type] || { label: type, cls: 'bg-gray-100 text-gray-700' }
+    return <span className={`text-xs px-1.5 py-0.5 rounded ${info.cls}`}>{info.label}</span>
+  }
+
+  const handleGenerateVolumeSummary = async () => {
+    if (!selectedModel) { alert('请先选择 AI 模型'); return }
+    if (!volSumChapterStart || !volSumChapterEnd) { alert('请输入章节范围'); return }
+    setVolSumLoading(true)
+    try {
+      await generateVolumeSummary(novelId, {
+        chapter_start: Number(volSumChapterStart),
+        chapter_end: Number(volSumChapterEnd),
+        model_id: selectedModel,
+      })
+      queryClient.invalidateQueries({ queryKey: ['narrativeMemories', novelId] })
+    } catch { alert('生成卷摘要失败') }
+    setVolSumLoading(false)
+  }
+
+  return (
+    <div>
+      {/* Generate section */}
+      <div className="bg-gray-50 rounded-lg p-4 mb-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-medium">生成卷摘要</span>
+          {models.length > 0 && (
+            <div>
+              <label className="text-xs text-gray-500 mr-1">模型:</label>
+              <select value={selectedModel} onChange={(e: any) => setSelectedModel(e.target.value)} className="border rounded px-2 py-0.5 text-xs">
+                {models.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500">起始章:</label>
+            <input type="number" value={volSumChapterStart} onChange={(e: any) => setVolSumChapterStart(e.target.value ? Number(e.target.value) : '')} className="border rounded px-2 py-0.5 text-xs w-16" min={1} />
+          </div>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500">结束章:</label>
+            <input type="number" value={volSumChapterEnd} onChange={(e: any) => setVolSumChapterEnd(e.target.value ? Number(e.target.value) : '')} className="border rounded px-2 py-0.5 text-xs w-16" min={1} />
+          </div>
+          <button
+            onClick={handleGenerateVolumeSummary}
+            disabled={volSumLoading}
+            className="bg-purple-600 text-white px-4 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50"
+          >
+            {volSumLoading ? '生成中...' : '生成卷摘要'}
+          </button>
+        </div>
+      </div>
+
+      {/* Grouped entries */}
+      {(['global', 'arc', 'volume'] as const).map(type => (
+        grouped[type].length > 0 && (
+          <div key={type} className="mb-4">
+            <h3 className="font-medium text-sm text-gray-600 mb-2">
+              {type === 'global' ? '全局摘要' : type === 'arc' ? '弧摘要' : '卷摘要'} ({grouped[type].length})
+            </h3>
+            <div className="space-y-2">
+              {grouped[type].map((m: any) => {
+                const isExpanded = memoryExpanded === m.id
+                const plotText = m.plot_progression || ''
+                const displayText = isExpanded ? plotText : (plotText.length > 200 ? plotText.slice(0, 200) + '...' : plotText)
+                return (
+                  <div key={m.id} className="bg-white rounded-lg p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-1">
+                      {typeBadge(m.type)}
+                      {(m.chapter_start != null && m.chapter_end != null) && (
+                        <span className="text-xs text-gray-500">第{m.chapter_start}-{m.chapter_end}章</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{displayText}</p>
+                    {plotText.length > 200 && (
+                      <button
+                        onClick={() => setMemoryExpanded(isExpanded ? null : m.id)}
+                        className="text-xs text-blue-600 hover:text-blue-800 mt-1"
+                      >
+                        {isExpanded ? '收起' : '展开全部'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      ))}
+      {(!memories || memories.length === 0) && <p className="text-gray-400 text-center py-8">暂无摘要记录，使用上方功能生成卷摘要</p>}
+    </div>
+  )
+}
+
+/* =====================================================
+   Task 19: Major Events (大事件) Tab Component
+   ===================================================== */
+function MajorEventsTab({ novelId, selectedModel, models, setSelectedModel, majorEventExpanded, setMajorEventExpanded, showMajorEventCreate, setShowMajorEventCreate, meChapterStart, setMeChapterStart, meChapterEnd, setMeChapterEnd, meRangeSummary, setMeRangeSummary, meRangeSummaryLoading, setMeRangeSummaryLoading, meSuggestions, setMeSuggestions, meSuggestionsLoading, setMeSuggestionsLoading, meTitle, setMeTitle, meDescription, setMeDescription, meTargetChapters, setMeTargetChapters, meBuildupStart, setMeBuildupStart, meCreating, setMeCreating, meCreateResult, setMeCreateResult, queryClient }: any) {
+  const { data: majorEvents } = useQuery({
+    queryKey: ['majorEvents', novelId],
+    queryFn: () => listMajorEvents(novelId).then(r => r.data),
+  })
+
+  const handleGenerateRangeSummary = async () => {
+    if (!selectedModel) { alert('请先选择 AI 模型'); return }
+    if (!meChapterStart || !meChapterEnd) { alert('请输入章节范围'); return }
+    setMeRangeSummaryLoading(true)
+    try {
+      const res = await generateRangeSummary(novelId, {
+        chapter_start: Number(meChapterStart),
+        chapter_end: Number(meChapterEnd),
+        model_id: selectedModel,
+      })
+      setMeRangeSummary(res.data.summary || res.data.value || JSON.stringify(res.data))
+    } catch { alert('生成范围摘要失败') }
+    setMeRangeSummaryLoading(false)
+  }
+
+  const handleGenerateSuggestions = async () => {
+    if (!selectedModel) { alert('请先选择 AI 模型'); return }
+    if (!meRangeSummary) { alert('请先生成范围摘要'); return }
+    setMeSuggestionsLoading(true)
+    try {
+      const res = await generateMajorEventIdeas(novelId, {
+        summary: meRangeSummary,
+        model_id: selectedModel,
+      })
+      setMeSuggestions(res.data.ideas || res.data.suggestions || (Array.isArray(res.data) ? res.data : [res.data]))
+    } catch { alert('生成建议失败') }
+    setMeSuggestionsLoading(false)
+  }
+
+  const handleCreateMajorEvent = async () => {
+    if (!meTitle.trim()) { alert('请输入事件标题'); return }
+    setMeCreating(true)
+    try {
+      const targetChaptersList = meTargetChapters
+        ? meTargetChapters.split(',').map((s: string) => Number(s.trim())).filter(Boolean)
+        : []
+      const res = await createMajorEvent(novelId, {
+        title: meTitle,
+        description: meDescription,
+        target_chapters: targetChaptersList,
+        buildup_start_chapter: meBuildupStart ? Number(meBuildupStart) : undefined,
+      })
+      setMeCreateResult(res.data)
+      queryClient.invalidateQueries({ queryKey: ['majorEvents', novelId] })
+      queryClient.invalidateQueries({ queryKey: ['foreshadowings', novelId] })
+    } catch { alert('创建大事件失败') }
+    setMeCreating(false)
+  }
+
+  const resetCreateFlow = () => {
+    setShowMajorEventCreate(false)
+    setMeRangeSummary('')
+    setMeSuggestions([])
+    setMeTitle('')
+    setMeDescription('')
+    setMeTargetChapters('')
+    setMeBuildupStart(1)
+    setMeCreateResult(null)
+  }
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="font-semibold">大事件管理</h2>
+        <button
+          onClick={() => setShowMajorEventCreate(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
+        >
+          创建大事件
+        </button>
+      </div>
+
+      {/* Create flow */}
+      {showMajorEventCreate && (
+        <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="font-medium text-sm">创建大事件</h3>
+            <button onClick={resetCreateFlow} className="text-gray-500 text-xs hover:text-gray-700">取消</button>
+          </div>
+
+          {/* Model selector */}
+          {models.length > 0 && (
+            <div>
+              <label className="text-xs text-gray-500 mr-1">模型:</label>
+              <select value={selectedModel} onChange={(e: any) => setSelectedModel(e.target.value)} className="border rounded px-2 py-0.5 text-xs">
+                {models.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Step 1: Range Summary */}
+          <div className="border-l-2 border-blue-400 pl-3">
+            <p className="text-xs font-medium text-gray-600 mb-2">第一步：生成范围摘要</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-gray-500">起始章:</label>
+                <input type="number" value={meChapterStart} onChange={(e: any) => setMeChapterStart(e.target.value ? Number(e.target.value) : '')} className="border rounded px-2 py-0.5 text-xs w-16" min={1} />
+              </div>
+              <div className="flex items-center gap-1">
+                <label className="text-xs text-gray-500">结束章:</label>
+                <input type="number" value={meChapterEnd} onChange={(e: any) => setMeChapterEnd(e.target.value ? Number(e.target.value) : '')} className="border rounded px-2 py-0.5 text-xs w-16" min={1} />
+              </div>
+              <button
+                onClick={handleGenerateRangeSummary}
+                disabled={meRangeSummaryLoading}
+                className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 disabled:opacity-50"
+              >
+                {meRangeSummaryLoading ? '生成中...' : '生成范围摘要'}
+              </button>
+            </div>
+            {meRangeSummary && (
+              <div className="mt-2 bg-white rounded p-2 text-sm text-gray-700 whitespace-pre-wrap border">
+                {meRangeSummary}
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Generate Suggestions */}
+          {meRangeSummary && (
+            <div className="border-l-2 border-purple-400 pl-3">
+              <p className="text-xs font-medium text-gray-600 mb-2">第二步：AI 生成建议</p>
+              <button
+                onClick={handleGenerateSuggestions}
+                disabled={meSuggestionsLoading}
+                className="bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50"
+              >
+                {meSuggestionsLoading ? '生成中...' : '生成建议'}
+              </button>
+              {meSuggestions.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {meSuggestions.map((s: any, i: number) => (
+                    <div
+                      key={i}
+                      className="bg-white rounded p-3 border cursor-pointer hover:border-purple-400 transition"
+                      onClick={() => {
+                        setMeTitle(s.title || '')
+                        setMeDescription(s.description || (typeof s === 'string' ? s : ''))
+                      }}
+                    >
+                      <p className="text-sm font-medium">{s.title || `建议 ${i + 1}`}</p>
+                      {s.description && <p className="text-xs text-gray-600 mt-1">{s.description}</p>}
+                      <p className="text-xs text-purple-500 mt-1">点击采用此建议</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 3: Create Form */}
+          {meRangeSummary && (
+            <div className="border-l-2 border-green-400 pl-3">
+              <p className="text-xs font-medium text-gray-600 mb-2">第三步：填写并创建</p>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-gray-500">事件标题</label>
+                  <input value={meTitle} onChange={(e: any) => setMeTitle(e.target.value)} className="w-full border rounded px-2 py-1 text-sm" placeholder="大事件标题" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">事件描述</label>
+                  <textarea value={meDescription} onChange={(e: any) => setMeDescription(e.target.value)} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={3} placeholder="详细描述这个大事件" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">目标章节（逗号分隔，例: 15,16,17）</label>
+                  <input value={meTargetChapters} onChange={(e: any) => setMeTargetChapters(e.target.value)} className="w-full border rounded px-2 py-1 text-sm" placeholder="15,16,17" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">铺垫起始章节</label>
+                  <input type="number" value={meBuildupStart} onChange={(e: any) => setMeBuildupStart(e.target.value ? Number(e.target.value) : '')} className="border rounded px-2 py-1 text-sm w-24" min={1} />
+                </div>
+                <button
+                  onClick={handleCreateMajorEvent}
+                  disabled={meCreating}
+                  className="bg-green-600 text-white px-4 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+                >
+                  {meCreating ? '创建中...' : '创建'}
+                </button>
+              </div>
+              {meCreateResult && (
+                <div className="mt-3 bg-green-50 rounded p-3 border border-green-200">
+                  <p className="text-sm font-medium text-green-800">大事件已创建</p>
+                  {meCreateResult.foreshadowings && meCreateResult.foreshadowings.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-xs text-green-700 font-medium">已创建伏笔:</p>
+                      <ul className="mt-1 space-y-1">
+                        {meCreateResult.foreshadowings.map((f: any, i: number) => (
+                          <li key={i} className="text-xs text-green-600">- {f.description || f.content || JSON.stringify(f)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Events list */}
+      <div className="space-y-3">
+        {(majorEvents || []).map((ev: any) => {
+          const isExpanded = majorEventExpanded === ev.id
+          return (
+            <div key={ev.id} className="bg-white rounded-lg p-4 shadow-sm">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium">{ev.title}</h3>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                      ev.status === '已完成' ? 'bg-green-100 text-green-700' :
+                      ev.status === '进行中' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{ev.status || '待执行'}</span>
+                  </div>
+                  {ev.chapter_range && <p className="text-xs text-gray-500 mt-0.5">章节范围: {ev.chapter_range}</p>}
+                  {ev.target_chapters && <p className="text-xs text-gray-500 mt-0.5">目标章节: {Array.isArray(ev.target_chapters) ? ev.target_chapters.join(', ') : ev.target_chapters}</p>}
+                  {ev.description && <p className="text-sm text-gray-600 mt-1">{ev.description}</p>}
+                </div>
+                <button
+                  onClick={() => setMajorEventExpanded(isExpanded ? null : ev.id)}
+                  className="text-xs text-blue-600 hover:text-blue-800 ml-2 whitespace-nowrap"
+                >
+                  {isExpanded ? '收起' : '详情'}
+                </button>
+              </div>
+              {isExpanded && ev.buildup_plan && (
+                <div className="mt-3 bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap">
+                  <p className="text-xs font-medium text-gray-500 mb-1">铺垫计划:</p>
+                  {typeof ev.buildup_plan === 'string' ? ev.buildup_plan : JSON.stringify(ev.buildup_plan, null, 2)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+        {(!majorEvents || majorEvents.length === 0) && <p className="text-gray-400 text-center py-8">暂无大事件，点击"创建大事件"开始规划</p>}
+      </div>
     </div>
   )
 }
