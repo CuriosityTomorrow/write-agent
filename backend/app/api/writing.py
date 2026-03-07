@@ -91,6 +91,12 @@ async def api_generate_outline(novel_id: int, data: GenerateOutlineRequest, db: 
             identity=char_data.get("identity"),
             personality=char_data.get("personality"),
             tags=char_data.get("tags"),
+            personality_tags=char_data.get("personality_tags"),
+            motivation=char_data.get("motivation"),
+            behavior_rules=char_data.get("behavior_rules"),
+            speech_pattern=char_data.get("speech_pattern"),
+            growth_arc_type=char_data.get("growth_arc_type"),
+            relationship_masks=char_data.get("relationship_masks"),
         )
         db.add(char)
 
