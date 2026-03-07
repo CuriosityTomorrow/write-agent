@@ -28,6 +28,7 @@ export default function ChapterEditor() {
   const [saved, setSaved] = useState(true)
   const [showRegenInput, setShowRegenInput] = useState(false)
   const [regenSuggestion, setRegenSuggestion] = useState('')
+  const [chapterType, setChapterType] = useState<string>('auto')
 
   const { data: chapter } = useQuery({
     queryKey: ['chapter', novelId, chapterId],
@@ -58,6 +59,9 @@ export default function ChapterEditor() {
     if (chapter?.content) {
       setContent(chapter.content)
     }
+    if (chapter?.chapter_type) {
+      setChapterType(chapter.chapter_type)
+    }
   }, [chapter])
 
   const generateChapter = async (suggestion: string = '') => {
@@ -73,7 +77,11 @@ export default function ChapterEditor() {
       const response = await fetch(`/api/novels/${novelId}/chapters/${chapterId}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model_id: selectedModel, suggestion }),
+        body: JSON.stringify({
+          model_id: selectedModel,
+          suggestion,
+          chapter_type: chapterType === 'auto' ? undefined : chapterType,
+        }),
       })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
@@ -105,7 +113,10 @@ export default function ChapterEditor() {
   }
 
   const handleSave = async () => {
-    await updateChapter(novelId, chapterId, { content })
+    await updateChapter(novelId, chapterId, {
+      content,
+      chapter_type: chapterType === 'auto' ? null : chapterType,
+    })
     setSaved(true)
     queryClient.invalidateQueries({ queryKey: ['chapter', novelId, chapterId] })
     // 保存后自动重新提取章节情报
@@ -218,6 +229,20 @@ export default function ChapterEditor() {
           <div className="mb-4">
             <label className="text-xs text-gray-500">目标字数</label>
             <p className="text-sm mt-1">{chapter?.target_word_count || 3000} 字</p>
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">章节类型</label>
+            <select
+              value={chapterType}
+              onChange={e => { setChapterType(e.target.value); setSaved(false) }}
+              className="w-full border rounded px-2 py-1 text-sm bg-white"
+            >
+              <option value="auto">自动</option>
+              <option value="setup">铺垫</option>
+              <option value="transition">递进</option>
+              <option value="climax">高潮</option>
+            </select>
           </div>
 
           <div className="mb-4">
@@ -374,6 +399,36 @@ export default function ChapterEditor() {
                   </div>
                 </div>
               )}
+
+              {/* Character Consistency */}
+              <div>
+                <label className="text-xs text-gray-500 font-medium">角色一致性</label>
+                {!intel.character_consistency || intel.character_consistency.length === 0 ? (
+                  <div className="mt-1 text-xs p-2 bg-green-50 text-green-700 rounded">
+                    &#10003; 角色行为一致
+                  </div>
+                ) : (
+                  <div className="mt-1 space-y-1">
+                    {intel.character_consistency.map((cc: any, i: number) => (
+                      <div key={i} className="text-xs p-2 bg-amber-50 border border-amber-200 rounded">
+                        <div className="flex items-center justify-between mb-1">
+                          <strong className="text-amber-800">{cc.name}</strong>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            cc.severity === 'major'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {cc.severity === 'major' ? '严重' : '轻微'}
+                          </span>
+                        </div>
+                        {cc.action && <div className="text-gray-600">行为: {cc.action}</div>}
+                        {cc.rule_violated && <div className="text-amber-700">违反: {cc.rule_violated}</div>}
+                        {cc.suggestion && <div className="text-gray-500 mt-0.5">建议: {cc.suggestion}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
