@@ -51,6 +51,8 @@ class ChapterIntelResponse(BaseModel):
     next_chapter_required_chars: list | None = None
     suggested_foreshadowings: list | None = None
     character_consistency: list | None = None
+    detected_new_characters: list | None = None
+    consistency_conflicts: list | None = None
 
     model_config = {"from_attributes": True}
 

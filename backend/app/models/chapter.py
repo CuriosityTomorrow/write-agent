@@ -54,6 +54,8 @@ class ChapterIntel(Base):
     next_chapter_required_chars: Mapped[list | None] = mapped_column(JSON, nullable=True)
     suggested_foreshadowings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     character_consistency: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    detected_new_characters: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    consistency_conflicts: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     chapter = relationship("Chapter", back_populates="intel")
