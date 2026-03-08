@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getChapter, updateChapter, getChapterIntel,
   listCharacters, listForeshadowings, extractIntel, getModels,
-  adoptSuggestedForeshadowing,
+  adoptSuggestedForeshadowing, createCharacter, checkConsistency,
+  updateNovel, updateCharacter,
 } from '../services/api'
 
 interface Model {
@@ -29,6 +30,14 @@ export default function ChapterEditor() {
   const [showRegenInput, setShowRegenInput] = useState(false)
   const [regenSuggestion, setRegenSuggestion] = useState('')
   const [chapterType, setChapterType] = useState<string>('auto')
+  const [chapterOutline, setChapterOutline] = useState('')
+  const [outlineEdited, setOutlineEdited] = useState(false)
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<number>>(new Set())
+  const [addingChar, setAddingChar] = useState<string | null>(null)
+  const [dismissedConflicts, setDismissedConflicts] = useState<Set<number>>(new Set())
+  const [checkingConsistency, setCheckingConsistency] = useState(false)
+  const [showIgnored, setShowIgnored] = useState(false)
+  const [updatingConflict, setUpdatingConflict] = useState<number | null>(null)
 
   const { data: chapter } = useQuery({
     queryKey: ['chapter', novelId, chapterId],
@@ -61,6 +70,9 @@ export default function ChapterEditor() {
     }
     if (chapter?.chapter_type) {
       setChapterType(chapter.chapter_type)
+    }
+    if (chapter?.chapter_outline !== undefined) {
+      setChapterOutline(chapter.chapter_outline || '')
     }
   }, [chapter])
 
@@ -115,6 +127,7 @@ export default function ChapterEditor() {
   const handleSave = async () => {
     await updateChapter(novelId, chapterId, {
       content,
+      ...(outlineEdited ? { chapter_outline: chapterOutline || null } : {}),
       chapter_type: chapterType === 'auto' ? null : chapterType,
     })
     setSaved(true)
@@ -128,6 +141,57 @@ export default function ChapterEditor() {
       } catch {}
       setExtracting(false)
     }
+  }
+
+  const handleCheckConsistency = async () => {
+    if (!selectedModel) return
+    setCheckingConsistency(true)
+    setDismissedConflicts(new Set())
+    try {
+      await checkConsistency(novelId, chapterId, { model_id: selectedModel })
+      refetchIntel()
+    } catch {}
+    setCheckingConsistency(false)
+  }
+
+  const handleUpdateSetting = async (conflict: any, idx: number) => {
+    const msg = `当前设定:\n${conflict.reference}\n\n建议更新为:\n${conflict.suggestion}\n\n确认更新？（可直接编辑建议内容）`
+    const userInput = prompt(msg, conflict.suggestion)
+    if (!userInput) return
+
+    setUpdatingConflict(idx)
+    try {
+      const type = conflict.type as string
+      const entity = conflict.related_entity as string
+
+      if (['world_setting', 'golden_finger', 'power_system'].includes(type)) {
+        await updateNovel(novelId, { [type]: userInput })
+      } else if (type.startsWith('character_') && entity) {
+        const char = (characters || []).find((c: any) => c.name === entity)
+        if (char) {
+          const fieldMap: Record<string, string> = {
+            character_personality: 'personality',
+            character_speech: 'speech_pattern',
+            character_location: 'current_location',
+            character_motivation: 'motivation',
+          }
+          const field = fieldMap[type]
+          if (field) {
+            await updateCharacter(novelId, char.id, { [field]: userInput })
+            queryClient.invalidateQueries({ queryKey: ['characters', novelId] })
+          }
+        }
+      } else if (type === 'outline_deviation') {
+        alert('请前往大纲页面手动更新')
+      } else if (type === 'foreshadowing_overdue') {
+        alert('请前往伏笔管理页面处理')
+      }
+
+      setDismissedConflicts(prev => new Set(prev).add(idx))
+    } catch (e) {
+      alert('更新失败')
+    }
+    setUpdatingConflict(null)
   }
 
   const handleContentChange = (val: string) => {
@@ -212,12 +276,16 @@ export default function ChapterEditor() {
         <div className="w-64 bg-gray-50 border-r p-4 overflow-y-auto">
           <h3 className="font-medium text-sm mb-3">章节配置</h3>
 
-          {chapter?.chapter_outline && (
-            <div className="mb-4">
-              <label className="text-xs text-gray-500">章节大纲</label>
-              <p className="text-sm mt-1">{chapter.chapter_outline}</p>
-            </div>
-          )}
+          <div className="mb-4">
+            <label className="text-xs text-gray-500">章节大纲</label>
+            <textarea
+              value={chapterOutline}
+              onChange={e => { setChapterOutline(e.target.value); setOutlineEdited(true); setSaved(false) }}
+              placeholder="输入章节大纲..."
+              className="w-full mt-1 border rounded px-2 py-1.5 text-sm resize-y focus:outline-none focus:ring-1 focus:ring-blue-500"
+              rows={3}
+            />
+          </div>
 
           {chapter?.conflict_description && (
             <div className="mb-4">
@@ -370,11 +438,13 @@ export default function ChapterEditor() {
                 </div>
               )}
 
-              {intel.suggested_foreshadowings && intel.suggested_foreshadowings.length > 0 && (
+              {intel.suggested_foreshadowings && intel.suggested_foreshadowings.filter((_: any, i: number) => !dismissedSuggestions.has(i)).length > 0 && (
                 <div>
                   <label className="text-xs text-gray-500 font-medium">AI 建议的伏笔</label>
                   <div className="mt-1 space-y-1">
-                    {intel.suggested_foreshadowings.map((sf: any, i: number) => (
+                    {intel.suggested_foreshadowings.map((sf: any, i: number) => {
+                      if (dismissedSuggestions.has(i)) return null
+                      return (
                       <div key={i} className="text-xs p-2 bg-purple-50 rounded">
                         <p>{sf.description}</p>
                         {sf.reason && <p className="text-gray-400 mt-0.5">理由: {sf.reason}</p>}
@@ -387,15 +457,20 @@ export default function ChapterEditor() {
                                 expected_resolve_chapter: sf.expected_resolve_chapter,
                               })
                               queryClient.invalidateQueries({ queryKey: ['foreshadowings', novelId] })
+                              setDismissedSuggestions(prev => new Set(prev).add(i))
                             }}
                             className="text-purple-600 hover:text-purple-800"
                           >
                             采纳
                           </button>
-                          <button className="text-gray-400 hover:text-gray-600">忽略</button>
+                          <button
+                            onClick={() => setDismissedSuggestions(prev => new Set(prev).add(i))}
+                            className="text-gray-400 hover:text-gray-600"
+                          >忽略</button>
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -428,6 +503,171 @@ export default function ChapterEditor() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* Detected New Characters */}
+              {intel.detected_new_characters && intel.detected_new_characters.length > 0 && (() => {
+                const charNames = new Set((characters || []).map((c: any) => c.name))
+                const newChars = intel.detected_new_characters.filter((nc: any) => !charNames.has(nc.name))
+                if (newChars.length === 0) return null
+                return (
+                  <div>
+                    <label className="text-xs text-emerald-700 font-medium">发现新角色</label>
+                    <div className="mt-1 space-y-1">
+                      {newChars.map((nc: any, i: number) => (
+                        <div key={i} className="text-xs p-2 bg-emerald-50 border border-emerald-200 rounded">
+                          <div className="flex items-center justify-between mb-1">
+                            <strong className="text-emerald-800">{nc.name}</strong>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                              {nc.role || '龙套'}
+                            </span>
+                          </div>
+                          {nc.identity && <div className="text-gray-600">身份: {nc.identity}</div>}
+                          {nc.first_appearance_context && <div className="text-gray-500 mt-0.5">初登场: {nc.first_appearance_context}</div>}
+                          <button
+                            onClick={async () => {
+                              setAddingChar(nc.name)
+                              try {
+                                await createCharacter(novelId, {
+                                  name: nc.name,
+                                  gender: nc.gender || null,
+                                  role: nc.role || '龙套',
+                                  identity: nc.identity || '',
+                                })
+                                queryClient.invalidateQueries({ queryKey: ['characters', novelId] })
+                              } catch {}
+                              setAddingChar(null)
+                            }}
+                            disabled={addingChar === nc.name}
+                            className="mt-1.5 text-emerald-600 hover:text-emerald-800 disabled:opacity-50"
+                          >
+                            {addingChar === nc.name ? '添加中...' : '添加到角色表'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Consistency Check */}
+              <div className="border-t pt-3 mt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-500 font-medium">一致性检查</label>
+                  <button
+                    onClick={handleCheckConsistency}
+                    disabled={checkingConsistency || !selectedModel}
+                    className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                  >
+                    {checkingConsistency ? '检查中...' : '刷新'}
+                  </button>
+                </div>
+
+                {(() => {
+                  const conflicts = intel?.consistency_conflicts
+                  if (!conflicts) return (
+                    <div className="text-xs text-gray-400">提取情报后自动检查</div>
+                  )
+                  if (conflicts.length === 0) return (
+                    <div className="text-xs p-2 bg-green-50 text-green-700 rounded">
+                      &#10003; 未发现一致性冲突
+                    </div>
+                  )
+
+                  const severityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+                  const severityEmoji: Record<string, string> = { high: '🔴', medium: '🟡', low: '🔵' }
+                  const severityLabel: Record<string, string> = { high: '严重', medium: '注意', low: '提示' }
+                  const typeLabel: Record<string, string> = {
+                    world_setting: '世界观', golden_finger: '金手指', power_system: '力量体系',
+                    character_personality: '角色性格', character_speech: '说话方式',
+                    character_location: '角色位置', character_motivation: '角色动机',
+                    outline_deviation: '大纲偏离', timeline: '时间线', foreshadowing_overdue: '伏笔超期',
+                  }
+
+                  const visible = conflicts
+                    .map((c: any, i: number) => ({ ...c, _idx: i }))
+                    .filter((_: any, i: number) => !dismissedConflicts.has(i))
+                    .sort((a: any, b: any) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2))
+
+                  const ignored = conflicts.filter((_: any, i: number) => dismissedConflicts.has(i))
+
+                  return (
+                    <div className="space-y-2">
+                      {visible.length === 0 && (
+                        <div className="text-xs text-gray-400">所有冲突已处理</div>
+                      )}
+                      {visible.map((cf: any) => (
+                        <div key={cf._idx} className={`text-xs p-2 rounded border ${
+                          cf.severity === 'high' ? 'bg-red-50 border-red-200' :
+                          cf.severity === 'medium' ? 'bg-amber-50 border-amber-200' :
+                          'bg-blue-50 border-blue-200'
+                        }`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-medium">
+                              {severityEmoji[cf.severity]} {typeLabel[cf.type] || cf.type}
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              cf.severity === 'high' ? 'bg-red-100 text-red-700' :
+                              cf.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-blue-100 text-blue-700'
+                            }`}>{severityLabel[cf.severity]}</span>
+                          </div>
+                          {cf.description && <div className="text-gray-700 mb-0.5">章节: {cf.description}</div>}
+                          {cf.reference && <div className="text-gray-500 mb-0.5">设定: {cf.reference}</div>}
+                          {cf.suggestion && <div className="text-gray-500 mb-1">建议: {cf.suggestion}</div>}
+                          <div className="flex gap-2 mt-1">
+                            {cf.type !== 'timeline' && (
+                              <button
+                                onClick={() => handleUpdateSetting(cf, cf._idx)}
+                                disabled={updatingConflict === cf._idx}
+                                className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                              >
+                                {updatingConflict === cf._idx ? '更新中...' : '更新设定'}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setDismissedConflicts(prev => new Set(prev).add(cf._idx))}
+                              className="text-gray-400 hover:text-gray-600"
+                            >忽略</button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {ignored.length > 0 && (
+                        <div className="border-t pt-2 mt-2">
+                          <button
+                            onClick={() => setShowIgnored(!showIgnored)}
+                            className="text-xs text-gray-400 hover:text-gray-600"
+                          >
+                            已忽略 ({ignored.length}) {showIgnored ? '▲' : '▼'}
+                          </button>
+                          {showIgnored && (
+                            <div className="mt-1 space-y-1">
+                              {conflicts.map((cf: any, i: number) => {
+                                if (!dismissedConflicts.has(i)) return null
+                                return (
+                                  <div key={i} className="text-xs p-1.5 bg-gray-50 rounded flex justify-between items-center">
+                                    <span className="text-gray-400 truncate">
+                                      {severityEmoji[cf.severity]} {typeLabel[cf.type]}: {cf.description?.slice(0, 30)}...
+                                    </span>
+                                    <button
+                                      onClick={() => setDismissedConflicts(prev => {
+                                        const next = new Set(prev)
+                                        next.delete(i)
+                                        return next
+                                      })}
+                                      className="text-xs text-blue-500 hover:text-blue-700 ml-2 shrink-0"
+                                    >恢复</button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             </div>
           )}

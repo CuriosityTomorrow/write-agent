@@ -32,6 +32,7 @@ export const getChapterIntel = (novelId: number, chapterId: number) => api.get(`
 export const listForeshadowings = (novelId: number) => api.get(`/novels/${novelId}/foreshadowings`)
 export const createForeshadowing = (novelId: number, data: any) => api.post(`/novels/${novelId}/foreshadowings`, data)
 export const updateForeshadowing = (novelId: number, fsId: number, data: any) => api.put(`/novels/${novelId}/foreshadowings/${fsId}`, data)
+export const deleteForeshadowing = (novelId: number, fsId: number) => api.delete(`/novels/${novelId}/foreshadowings/${fsId}`)
 export const adoptSuggestedForeshadowing = (novelId: number, data: any) => api.post(`/novels/${novelId}/foreshadowings/adopt-suggestion`, data)
 
 // Writing
@@ -40,6 +41,10 @@ export const regenerateField = (data: any) => api.post('/generate/regenerate-fie
 export const regenerateNovelField = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/regenerate-field`, data)
 export const generateOutline = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/outline`, data)
 export const extractIntel = (novelId: number, chapterId: number, data: any) => api.post(`/novels/${novelId}/chapters/${chapterId}/extract-intel`, data)
+export const checkConsistency = (novelId: number, chapterId: number, data: any) => api.post(`/novels/${novelId}/chapters/${chapterId}/check-consistency`, data)
+export const generateOutlineFromPrompt = (data: any) => api.post('/generate/outline-from-prompt', data)
+export const extractFromOutline = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/extract-from-outline`, data)
+export const generateCharacter = (novelId: number, data: any) => api.post(`/novels/${novelId}/generate/character`, data)
 
 // Narrative Memory
 export const listNarrativeMemories = (novelId: number) => api.get(`/novels/${novelId}/narrative-memories`)
