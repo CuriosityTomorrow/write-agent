@@ -12,6 +12,8 @@ from app.models import (
 )
 from app.models.narrative_memory import NarrativeMemory
 from app.prompts import idea_generator, outline_generator, chapter_generator, intel_extractor, volume_compressor
+from app.prompts import outline_from_prompt, outline_extractor
+from app.prompts import consistency_checker
 from app.prompts.presets import get_preset
 from app.services.memory_system import ContextBuilder
 
@@ -412,6 +414,142 @@ async def generate_outline(novel_id: int, target_chapters: int, model_id: str, d
     return _parse_json(response)
 
 
+async def generate_outline_from_prompt(
+    genre: str,
+    mode: str,
+    user_prompt: str,
+    suggestion: str,
+    model_id: str,
+) -> str:
+    """根据用户碎片化灵感生成纯文本大纲"""
+    provider = get_provider(model_id)
+    prompt = outline_from_prompt.build_outline_from_prompt(genre, mode, user_prompt, suggestion)
+    response = await provider.generate_complete(
+        messages=[Message(role="user", content=prompt)],
+        system_prompt=outline_from_prompt.SYSTEM_PROMPT,
+        config=GenerateConfig(temperature=0.8, max_tokens=3000, stream=False),
+    )
+    return response.strip()
+
+
+async def extract_from_outline(
+    novel_id: int,
+    outline_text: str,
+    model_id: str,
+    db: AsyncSession,
+) -> dict:
+    """从自由文本大纲中提取结构化数据"""
+    novel = await db.get(Novel, novel_id)
+    if not novel:
+        raise ValueError("Novel not found")
+
+    provider = get_provider(model_id)
+    prompt = outline_extractor.build_extraction_prompt(
+        outline_text=outline_text,
+        genre=novel.genre,
+        mode=novel.mode,
+        target_chapters=novel.target_chapters or 100,
+    )
+    response = await provider.generate_complete(
+        messages=[Message(role="user", content=prompt)],
+        system_prompt=outline_extractor.SYSTEM_PROMPT,
+        config=GenerateConfig(temperature=0.5, max_tokens=4000, stream=False),
+    )
+    return _parse_json(response)
+
+
+async def generate_character(
+    novel_id: int,
+    prompt: str,
+    model_id: str,
+    db: AsyncSession,
+    existing_character: dict | None = None,
+) -> dict:
+    """根据提示词生成或重新生成角色，结合小说上下文"""
+    novel = await db.get(Novel, novel_id)
+    if not novel:
+        raise ValueError("Novel not found")
+
+    # 构建小说上下文
+    ctx_parts = [f"类型: {novel.genre}，模式: {novel.mode}"]
+    outline_result = await db.execute(
+        select(Outline).where(Outline.novel_id == novel_id)
+    )
+    outline = outline_result.scalar_one_or_none()
+    if outline:
+        if outline.raw_outline:
+            ctx_parts.append(f"大纲概要: {outline.raw_outline[:500]}")
+        if outline.story_background:
+            ctx_parts.append(f"故事背景: {outline.story_background[:200]}")
+
+    # 已有角色名单（避免重复）
+    char_result = await db.execute(
+        select(Character).where(Character.novel_id == novel_id)
+    )
+    existing_chars = char_result.scalars().all()
+    if existing_chars:
+        ctx_parts.append("已有角色: " + "、".join(f"{c.name}({c.role})" for c in existing_chars))
+
+    context = "\n".join(ctx_parts)
+
+    if existing_character:
+        # 重新生成已有角色
+        char_json = json.dumps(existing_character, ensure_ascii=False, indent=2)
+        user_prompt = f"""你是一位网络小说角色设计师。请根据用户的要求，重新生成/优化以下角色。
+
+【小说信息】
+{context}
+
+【当前角色数据】
+{char_json}
+
+【用户要求】
+{prompt}
+
+请输出完整的角色JSON（保持相同格式），根据用户要求进行修改和优化。
+如果用户没有具体指出要改什么，则全面优化角色设定使其更丰满。"""
+    else:
+        # 新建角色
+        user_prompt = f"""你是一位网络小说角色设计师。请根据用户的描述，为小说创建一个新角色。
+
+【小说信息】
+{context}
+
+【用户描述】
+{prompt}
+
+请根据描述生成角色，名字和设定要符合小说世界观，避免与已有角色重复。"""
+
+    system_prompt = f"""你是一位经验丰富的网络小说角色设计师。
+请严格按以下JSON格式输出角色数据，不要输出任何其他内容：
+{{
+  "name": "角色名",
+  "role": "主角/配角/反派",
+  "identity": "身份设定",
+  "personality": "性格特征详细描述",
+  "tags": ["标签1", "标签2"],
+  "personality_tags": ["核心性格1", "核心性格2"],
+  "motivation": "核心动机",
+  "behavior_rules": {{
+    "absolute_do": ["一定会做的事"],
+    "absolute_dont": ["绝对不做的事"]
+  }},
+  "speech_pattern": "说话风格",
+  "growth_arc_type": "staircase/spiral/cliff/platform",
+  "relationship_masks": {{
+    "某角色或关系": "态度"
+  }}
+}}"""
+
+    provider = get_provider(model_id)
+    response = await provider.generate_complete(
+        messages=[Message(role="user", content=user_prompt)],
+        system_prompt=system_prompt,
+        config=GenerateConfig(temperature=0.8, max_tokens=1500, stream=False),
+    )
+    return _parse_json(response)
+
+
 async def generate_chapter_stream(
     novel_id: int,
     chapter_id: int,
@@ -431,6 +569,18 @@ async def generate_chapter_stream(
     chapter_chars = result.scalars().all()
     required_ids = [cc.character_id for cc in chapter_chars if cc.is_required]
     optional_ids = [cc.character_id for cc in chapter_chars if not cc.is_required]
+
+    # 如果没有配置任何角色，自动注入所有角色（主角为必选，其余为可选）
+    if not required_ids and not optional_ids:
+        all_chars_result = await db.execute(
+            select(Character).where(Character.novel_id == novel_id)
+        )
+        all_chars = all_chars_result.scalars().all()
+        for c in all_chars:
+            if c.role == "主角":
+                required_ids.append(c.id)
+            else:
+                optional_ids.append(c.id)
 
     provider = get_provider(model_id)
     max_context = provider.max_context_length()
@@ -553,6 +703,15 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
     )
     intel_data = _parse_json(response)
 
+    # 删除旧 intel（重新提取时替换）
+    old_intel_result = await db.execute(
+        select(ChapterIntel).where(ChapterIntel.chapter_id == chapter_id)
+    )
+    old_intel = old_intel_result.scalar_one_or_none()
+    if old_intel:
+        await db.delete(old_intel)
+        await db.flush()
+
     # 保存 ChapterIntel
     intel = ChapterIntel(
         chapter_id=chapter_id,
@@ -565,6 +724,7 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
         next_chapter_required_chars=intel_data.get("next_chapter_required_chars"),
         suggested_foreshadowings=intel_data.get("suggested_foreshadowings"),
         character_consistency=intel_data.get("character_consistency"),
+        detected_new_characters=intel_data.get("detected_new_characters"),
     )
     db.add(intel)
 
@@ -621,6 +781,134 @@ async def extract_chapter_intel(chapter_id: int, model_id: str, db: AsyncSession
 
     await db.commit()
     return intel_data
+
+
+async def check_consistency(chapter_id: int, model_id: str, db: AsyncSession) -> list:
+    """比对章节内容与设定的一致性"""
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or not chapter.content:
+        raise ValueError("Chapter not found or has no content")
+
+    novel = await db.get(Novel, chapter.novel_id)
+
+    # Novel 设定
+    novel_settings = {
+        "world_setting": novel.world_setting,
+        "golden_finger": novel.golden_finger,
+        "power_system": novel.power_system,
+        "core_conflict": novel.core_conflict,
+        "protagonist_identity": novel.protagonist_identity,
+    }
+
+    # 出场角色完整设定卡
+    result = await db.execute(
+        select(Character).where(Character.novel_id == chapter.novel_id)
+    )
+    all_characters = result.scalars().all()
+
+    # 上一章 intel（取角色状态）
+    prev_intel_data = None
+    if chapter.chapter_number > 1:
+        prev_chapter_result = await db.execute(
+            select(Chapter).where(
+                Chapter.novel_id == chapter.novel_id,
+                Chapter.chapter_number == chapter.chapter_number - 1,
+            )
+        )
+        prev_chapter = prev_chapter_result.scalar_one_or_none()
+        if prev_chapter:
+            prev_intel_result = await db.execute(
+                select(ChapterIntel).where(ChapterIntel.chapter_id == prev_chapter.id)
+            )
+            prev_intel_obj = prev_intel_result.scalar_one_or_none()
+            if prev_intel_obj:
+                prev_intel_data = {
+                    "timeline_events": prev_intel_obj.timeline_events,
+                    "character_updates": prev_intel_obj.character_updates,
+                }
+
+    # 构建角色设定卡（含上一章状态）
+    prev_char_states = {}
+    if prev_intel_data and prev_intel_data.get("character_updates"):
+        for cu in prev_intel_data["character_updates"]:
+            if isinstance(cu, dict):
+                prev_char_states[cu.get("name", "")] = cu
+
+    char_dicts = []
+    for c in all_characters:
+        d = {
+            "name": c.name,
+            "role": c.role,
+            "personality": c.personality,
+            "personality_tags": c.personality_tags,
+            "motivation": c.motivation,
+            "behavior_rules": c.behavior_rules,
+            "speech_pattern": c.speech_pattern,
+            "relationship_masks": c.relationship_masks,
+        }
+        prev = prev_char_states.get(c.name, {})
+        d["prev_location"] = prev.get("location") or c.current_location
+        d["prev_emotional_state"] = prev.get("emotional_state") or c.emotional_state
+        char_dicts.append(d)
+
+    # 大纲 plot_point
+    outline_result = await db.execute(
+        select(Outline).where(Outline.novel_id == chapter.novel_id)
+    )
+    outline = outline_result.scalar_one_or_none()
+    plot_point = None
+    if outline and outline.plot_points:
+        idx = chapter.chapter_number - 1
+        if idx < len(outline.plot_points):
+            pp = outline.plot_points[idx]
+            if isinstance(pp, dict):
+                plot_point = pp.get("summary") or pp.get("title", "")
+            else:
+                plot_point = str(pp)
+
+    # 超期伏笔
+    fs_result = await db.execute(
+        select(Foreshadowing).where(
+            Foreshadowing.novel_id == chapter.novel_id,
+            Foreshadowing.status.notin_(["已回收", "已解决"]),
+            Foreshadowing.expected_resolve_end.isnot(None),
+            Foreshadowing.expected_resolve_end <= chapter.chapter_number,
+        )
+    )
+    overdue_fs = [
+        {"id": f.id, "description": f.description, "expected_resolve_end": f.expected_resolve_end}
+        for f in fs_result.scalars().all()
+    ]
+
+    # 调 LLM
+    provider = get_provider(model_id)
+    prompt = consistency_checker.build_consistency_prompt(
+        chapter_content=chapter.content,
+        chapter_number=chapter.chapter_number,
+        novel_settings=novel_settings,
+        characters=char_dicts,
+        plot_point=plot_point,
+        prev_intel=prev_intel_data,
+        overdue_foreshadowings=overdue_fs if overdue_fs else None,
+    )
+    response = await provider.generate_complete(
+        messages=[Message(role="user", content=prompt)],
+        system_prompt=consistency_checker.SYSTEM_PROMPT,
+        config=GenerateConfig(temperature=0.2, max_tokens=3000, stream=False),
+    )
+    result_data = _parse_json(response)
+    conflicts = result_data.get("conflicts", [])
+
+    # 存入 ChapterIntel
+    intel_result = await db.execute(
+        select(ChapterIntel).where(ChapterIntel.chapter_id == chapter_id)
+    )
+    intel = intel_result.scalar_one_or_none()
+    if intel:
+        intel.consistency_conflicts = conflicts
+        await db.commit()
+
+    return conflicts
 
 
 async def generate_volume_summary(
