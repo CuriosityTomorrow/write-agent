@@ -4,6 +4,7 @@ from datetime import datetime
 
 class CharacterCreate(BaseModel):
     name: str
+    gender: str | None = None
     role: str
     tags: list[str] | None = None
     identity: str | None = None
@@ -20,6 +21,7 @@ class CharacterCreate(BaseModel):
 
 class CharacterUpdate(BaseModel):
     name: str | None = None
+    gender: str | None = None
     role: str | None = None
     tags: list[str] | None = None
     identity: str | None = None
@@ -41,6 +43,7 @@ class CharacterResponse(BaseModel):
     id: int
     novel_id: int
     name: str
+    gender: str | None = None
     role: str
     tags: list[str] | None = None
     identity: str | None = None

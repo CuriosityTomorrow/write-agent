@@ -35,8 +35,12 @@ export default function ChapterEditor() {
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<number>>(new Set())
   const [addingChar, setAddingChar] = useState<string | null>(null)
   const [dismissedConflicts, setDismissedConflicts] = useState<Set<number>>(new Set())
+  const [resolvedConflicts, setResolvedConflicts] = useState<Set<number>>(new Set())
+  const [pendingRevisions, setPendingRevisions] = useState<Set<number>>(new Set())
   const [checkingConsistency, setCheckingConsistency] = useState(false)
   const [showIgnored, setShowIgnored] = useState(false)
+  const [showResolved, setShowResolved] = useState(false)
+  const [showPending, setShowPending] = useState(true)
   const [updatingConflict, setUpdatingConflict] = useState<number | null>(null)
 
   const { data: chapter } = useQuery({
@@ -147,6 +151,8 @@ export default function ChapterEditor() {
     if (!selectedModel) return
     setCheckingConsistency(true)
     setDismissedConflicts(new Set())
+    setResolvedConflicts(new Set())
+    setPendingRevisions(new Set())
     try {
       await checkConsistency(novelId, chapterId, { model_id: selectedModel })
       refetchIntel()
@@ -185,9 +191,11 @@ export default function ChapterEditor() {
         alert('请前往大纲页面手动更新')
       } else if (type === 'foreshadowing_overdue') {
         alert('请前往伏笔管理页面处理')
+      } else if (type === 'timeline') {
+        alert('时间线冲突已记录，请在章节内容中核实修正')
       }
 
-      setDismissedConflicts(prev => new Set(prev).add(idx))
+      setResolvedConflicts(prev => new Set(prev).add(idx))
     } catch (e) {
       alert('更新失败')
     }
@@ -586,10 +594,12 @@ export default function ChapterEditor() {
 
                   const visible = conflicts
                     .map((c: any, i: number) => ({ ...c, _idx: i }))
-                    .filter((_: any, i: number) => !dismissedConflicts.has(i))
+                    .filter((_: any, i: number) => !dismissedConflicts.has(i) && !resolvedConflicts.has(i) && !pendingRevisions.has(i))
                     .sort((a: any, b: any) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2))
 
                   const ignored = conflicts.filter((_: any, i: number) => dismissedConflicts.has(i))
+                  const resolved = conflicts.filter((_: any, i: number) => resolvedConflicts.has(i))
+                  const pending = conflicts.filter((_: any, i: number) => pendingRevisions.has(i))
 
                   return (
                     <div className="space-y-2">
@@ -616,7 +626,6 @@ export default function ChapterEditor() {
                           {cf.reference && <div className="text-gray-500 mb-0.5">设定: {cf.reference}</div>}
                           {cf.suggestion && <div className="text-gray-500 mb-1">建议: {cf.suggestion}</div>}
                           <div className="flex gap-2 mt-1">
-                            {cf.type !== 'timeline' && (
                               <button
                                 onClick={() => handleUpdateSetting(cf, cf._idx)}
                                 disabled={updatingConflict === cf._idx}
@@ -624,7 +633,10 @@ export default function ChapterEditor() {
                               >
                                 {updatingConflict === cf._idx ? '更新中...' : '更新设定'}
                               </button>
-                            )}
+                            <button
+                              onClick={() => setPendingRevisions(prev => new Set(prev).add(cf._idx))}
+                              className="text-orange-500 hover:text-orange-700"
+                            >章节待改</button>
                             <button
                               onClick={() => setDismissedConflicts(prev => new Set(prev).add(cf._idx))}
                               className="text-gray-400 hover:text-gray-600"
@@ -632,6 +644,74 @@ export default function ChapterEditor() {
                           </div>
                         </div>
                       ))}
+
+                      {resolved.length > 0 && (
+                        <div className="border-t pt-2 mt-2">
+                          <button
+                            onClick={() => setShowResolved(!showResolved)}
+                            className="text-xs text-green-500 hover:text-green-700"
+                          >
+                            已处理 ({resolved.length}) {showResolved ? '▲' : '▼'}
+                          </button>
+                          {showResolved && (
+                            <div className="mt-1 space-y-1">
+                              {conflicts.map((cf: any, i: number) => {
+                                if (!resolvedConflicts.has(i)) return null
+                                return (
+                                  <div key={i} className="text-xs p-1.5 bg-green-50 rounded flex justify-between items-center">
+                                    <span className="text-green-600 truncate">
+                                      ✓ {typeLabel[cf.type]}: {cf.description?.slice(0, 30)}...
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {pending.length > 0 && (
+                        <div className="border-t pt-2 mt-2">
+                          <button
+                            onClick={() => setShowPending(!showPending)}
+                            className="text-xs text-orange-500 hover:text-orange-700"
+                          >
+                            章节待改 ({pending.length}) {showPending ? '▲' : '▼'}
+                          </button>
+                          {showPending && (
+                            <div className="mt-1 space-y-1">
+                              {conflicts.map((cf: any, i: number) => {
+                                if (!pendingRevisions.has(i)) return null
+                                return (
+                                  <div key={i} className="text-xs p-1.5 bg-orange-50 border border-orange-200 rounded">
+                                    <div className="flex justify-between items-start">
+                                      <span className="text-orange-700">
+                                        ✎ {typeLabel[cf.type]}: {cf.description?.slice(0, 40)}
+                                      </span>
+                                    </div>
+                                    {cf.reference && <div className="text-gray-500 mt-0.5">设定: {cf.reference}</div>}
+                                    <div className="flex gap-2 mt-1">
+                                      <button
+                                        onClick={() => {
+                                          setPendingRevisions(prev => { const n = new Set(prev); n.delete(i); return n })
+                                          setResolvedConflicts(prev => new Set(prev).add(i))
+                                        }}
+                                        className="text-green-600 hover:text-green-800"
+                                      >已修改</button>
+                                      <button
+                                        onClick={() => {
+                                          setPendingRevisions(prev => { const n = new Set(prev); n.delete(i); return n })
+                                        }}
+                                        className="text-blue-500 hover:text-blue-700"
+                                      >撤回</button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {ignored.length > 0 && (
                         <div className="border-t pt-2 mt-2">

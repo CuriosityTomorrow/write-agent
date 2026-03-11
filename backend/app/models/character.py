@@ -12,6 +12,7 @@ class Character(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(100))
+    gender: Mapped[str | None] = mapped_column(String(10), nullable=True)
     role: Mapped[str] = mapped_column(String(20))
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     identity: Mapped[str | None] = mapped_column(Text, nullable=True)

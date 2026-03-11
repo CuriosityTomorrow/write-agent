@@ -48,6 +48,7 @@ class Outline(Base):
     story_background: Mapped[str | None] = mapped_column(Text, nullable=True)
     main_plot: Mapped[str | None] = mapped_column(Text, nullable=True)
     plot_points: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    raw_outline: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     novel = relationship("Novel", back_populates="outline")

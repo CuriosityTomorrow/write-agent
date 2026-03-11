@@ -170,7 +170,8 @@ class ContextBuilder:
         for cid in optional_ids:
             char = await self.db.get(Character, cid)
             if char:
-                parts.append(f"[可选] {char.name}({char.role}): {char.identity or ''}")
+                gender_str = f"，{char.gender}" if char.gender else ""
+                parts.append(f"[可选] {char.name}({char.role}{gender_str}): {char.identity or ''}")
 
         # 角色关系
         all_ids = required_ids + optional_ids
@@ -192,6 +193,8 @@ class ContextBuilder:
 
     def _format_character_full(self, char: Character) -> str:
         lines = [f"【{char.name}（{char.role}）】"]
+        if char.gender:
+            lines.append(f"性别: {char.gender}")
         if char.identity:
             lines.append(f"身份: {char.identity}")
         if char.golden_finger:

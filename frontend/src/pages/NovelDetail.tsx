@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getNovel, getOutline, listCharacters, listChapters,
+  getNovel, getOutline, listCharacters, listChapters, deleteNovel,
   listForeshadowings, createCharacter, createChapter, deleteChapter, updateCharacter,
   updateOutline, regenerateNovelField, getModels, exportTxt,
-  createForeshadowing,
+  createForeshadowing, updateForeshadowing, deleteForeshadowing,
   listNarrativeMemories, generateVolumeSummary,
   listMajorEvents, generateMajorEventIdeas, createMajorEvent, generateRangeSummary,
+  generateCharacter,
 } from '../services/api'
 
 export default function NovelDetail() {
@@ -18,6 +19,7 @@ export default function NovelDetail() {
   const [activeTab, setActiveTab] = useState<'outline' | 'characters' | 'chapters' | 'foreshadowings' | 'memories' | 'majorEvents'>('chapters')
   const [showNewChar, setShowNewChar] = useState(false)
   const [newCharName, setNewCharName] = useState('')
+  const [newCharGender, setNewCharGender] = useState('男')
   const [newCharRole, setNewCharRole] = useState('配角')
   const [newCharIdentity, setNewCharIdentity] = useState('')
   const [showNewChapter, setShowNewChapter] = useState(false)
@@ -53,10 +55,17 @@ export default function NovelDetail() {
   const [newFsDesc, setNewFsDesc] = useState('')
   const [newFsType, setNewFsType] = useState('中线')
   const [newFsResolveChapter, setNewFsResolveChapter] = useState<number | ''>('')
+  const [editingFsId, setEditingFsId] = useState<number | null>(null)
+  const [editFsDesc, setEditFsDesc] = useState('')
+  const [editFsType, setEditFsType] = useState('中线')
+  const [editFsStatus, setEditFsStatus] = useState('埋设')
 
   // Character editing (Task 5)
   const [editingCharId, setEditingCharId] = useState<number | null>(null)
   const [editChar, setEditChar] = useState<any>(null)
+  const [charAiPrompt, setCharAiPrompt] = useState('')
+  const [charAiLoading, setCharAiLoading] = useState(false)
+  const [showCharAiInput, setShowCharAiInput] = useState(false)
   const [charSaving, setCharSaving] = useState(false)
   const [charDriverExpanded, setCharDriverExpanded] = useState(false)
 
@@ -81,6 +90,9 @@ export default function NovelDetail() {
   const [meBuildupStart, setMeBuildupStart] = useState<number | ''>(1)
   const [meCreating, setMeCreating] = useState(false)
   const [meCreateResult, setMeCreateResult] = useState<any>(null)
+  const [meEditingIndex, setMeEditingIndex] = useState<number | null>(null)
+  const [meEditForm, setMeEditForm] = useState<any>(null)
+  const [meSaving, setMeSaving] = useState(false)
 
   const { data: novel } = useQuery({ queryKey: ['novel', novelId], queryFn: () => getNovel(novelId).then(r => r.data) })
   const { data: outline } = useQuery({ queryKey: ['outline', novelId], queryFn: () => getOutline(novelId).then(r => r.data) })
@@ -89,11 +101,12 @@ export default function NovelDetail() {
   const { data: foreshadowings } = useQuery({ queryKey: ['foreshadowings', novelId], queryFn: () => listForeshadowings(novelId).then(r => r.data) })
 
   const addCharMutation = useMutation({
-    mutationFn: () => createCharacter(novelId, { name: newCharName, role: newCharRole, identity: newCharIdentity }),
+    mutationFn: () => createCharacter(novelId, { name: newCharName, gender: newCharGender, role: newCharRole, identity: newCharIdentity }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['characters', novelId] })
       setShowNewChar(false)
       setNewCharName('')
+      setNewCharGender('男')
       setNewCharRole('配角')
       setNewCharIdentity('')
     },
@@ -108,6 +121,60 @@ export default function NovelDetail() {
       navigate(`/novel/${String(novelId)}/chapter/${String(res.data.id)}`)
     },
   })
+
+  // --- Major Event editing handlers ---
+  const handleSaveMajorEvent = async (eventIndex: number) => {
+    if (!outline || !meEditForm) return
+    setMeSaving(true)
+    try {
+      // Find the actual index in plot_points (majorEvents are filtered from plot_points where event_scale=major)
+      const allPoints = outline.plot_points || []
+      let majorIdx = -1
+      let realIdx = -1
+      for (let i = 0; i < allPoints.length; i++) {
+        if (typeof allPoints[i] === 'object' && allPoints[i].event_scale === 'major') {
+          majorIdx++
+          if (majorIdx === eventIndex) { realIdx = i; break }
+        }
+      }
+      if (realIdx >= 0) {
+        const updated = [...allPoints]
+        updated[realIdx] = { ...updated[realIdx], ...meEditForm }
+        await updateOutline(novelId, { plot_points: updated })
+        queryClient.invalidateQueries({ queryKey: ['outline', novelId] })
+        queryClient.invalidateQueries({ queryKey: ['majorEvents', novelId] })
+      }
+      setMeEditingIndex(null)
+      setMeEditForm(null)
+    } catch { alert('保存失败') }
+    setMeSaving(false)
+  }
+
+  const handleDeleteMajorEvent = async (eventIndex: number) => {
+    if (!outline) return
+    if (!confirm('确定删除此大事件？')) return
+    setMeSaving(true)
+    try {
+      const allPoints = outline.plot_points || []
+      let majorIdx = -1
+      let realIdx = -1
+      for (let i = 0; i < allPoints.length; i++) {
+        if (typeof allPoints[i] === 'object' && allPoints[i].event_scale === 'major') {
+          majorIdx++
+          if (majorIdx === eventIndex) { realIdx = i; break }
+        }
+      }
+      if (realIdx >= 0) {
+        const updated = allPoints.filter((_: any, i: number) => i !== realIdx)
+        await updateOutline(novelId, { plot_points: updated })
+        queryClient.invalidateQueries({ queryKey: ['outline', novelId] })
+        queryClient.invalidateQueries({ queryKey: ['majorEvents', novelId] })
+      }
+      setMeEditingIndex(null)
+      setMeEditForm(null)
+    } catch { alert('删除失败') }
+    setMeSaving(false)
+  }
 
   // --- Outline editing handlers ---
   const startEditOutline = () => {
@@ -197,6 +264,7 @@ export default function NovelDetail() {
     setEditingCharId(c.id)
     setEditChar({
       name: c.name || '',
+      gender: c.gender || '男',
       role: c.role || '配角',
       identity: c.identity || '',
       personality: c.personality || '',
@@ -217,9 +285,58 @@ export default function NovelDetail() {
     setCharDriverExpanded(false)
   }
 
+  const handleCharAiRegen = async () => {
+    if (!editChar || !editingCharId || !selectedModel) { alert('请先选择 AI 模型'); return }
+    setCharAiLoading(true)
+    try {
+      const existingCharacter = {
+        name: editChar.name,
+        gender: editChar.gender,
+        role: editChar.role,
+        identity: editChar.identity,
+        personality: editChar.personality,
+        background: editChar.background,
+        golden_finger: editChar.golden_finger,
+        motivation: editChar.motivation,
+        speech_pattern: editChar.speech_pattern,
+        growth_arc_type: editChar.growth_arc_type,
+      }
+      const res = await generateCharacter(novelId, {
+        prompt: charAiPrompt || '根据现有信息全面优化这个角色',
+        model_id: selectedModel,
+        existing_character: existingCharacter,
+      })
+      const d = res.data
+      setEditChar((prev: any) => ({
+        ...prev,
+        name: d.name || prev.name,
+        role: d.role || prev.role,
+        identity: d.identity || prev.identity,
+        personality: d.personality || prev.personality,
+        background: d.background || prev.background,
+        golden_finger: d.golden_finger || prev.golden_finger,
+        personality_tags: Array.isArray(d.personality_tags) ? d.personality_tags.join(', ') : (prev.personality_tags || ''),
+        motivation: d.motivation || prev.motivation,
+        behavior_rules_do: Array.isArray(d.behavior_rules?.absolute_do) ? d.behavior_rules.absolute_do.join('\n') : prev.behavior_rules_do,
+        behavior_rules_dont: Array.isArray(d.behavior_rules?.absolute_dont) ? d.behavior_rules.absolute_dont.join('\n') : prev.behavior_rules_dont,
+        speech_pattern: d.speech_pattern || prev.speech_pattern,
+        growth_arc_type: d.growth_arc_type || prev.growth_arc_type,
+        relationship_masks: d.relationship_masks && typeof d.relationship_masks === 'object'
+          ? Object.entries(d.relationship_masks).map(([k, v]) => `${k}: ${v}`).join('\n')
+          : prev.relationship_masks,
+      }))
+      setShowCharAiInput(false)
+      setCharAiPrompt('')
+      setCharDriverExpanded(true)
+    } catch { alert('AI 生成失败，请重试') }
+    setCharAiLoading(false)
+  }
+
   const cancelEditChar = () => {
     setEditingCharId(null)
     setEditChar(null)
+    setShowCharAiInput(false)
+    setCharAiPrompt('')
   }
 
   const saveChar = async () => {
@@ -244,6 +361,7 @@ export default function NovelDetail() {
       }
       const payload = {
         name: editChar.name,
+        gender: editChar.gender,
         role: editChar.role,
         identity: editChar.identity,
         personality: editChar.personality,
@@ -285,12 +403,26 @@ export default function NovelDetail() {
           <p className="text-sm text-gray-500">{novel.author_name} &middot; {novel.genre} &middot; {novel.mode} &middot; {novel.status}</p>
           {novel.synopsis && <p className="text-sm text-gray-600 mt-2">{novel.synopsis}</p>}
         </div>
-        <a
-          href={exportTxt(novelId)}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
-        >
-          导出 TXT
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={exportTxt(novelId)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
+          >
+            导出 TXT
+          </a>
+          <button
+            onClick={async () => {
+              if (!confirm(`确定删除《${novel.title}》？所有章节、大纲、角色、伏笔等关联数据都将被永久删除，此操作不可撤销。`)) return
+              try {
+                await deleteNovel(novelId)
+                navigate('/')
+              } catch { alert('删除失败') }
+            }}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm"
+          >
+            删除小说
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -409,6 +541,8 @@ export default function NovelDetail() {
                       e.stopPropagation()
                       if (!confirm(`确定删除第${ch.chapter_number}章？此操作不可撤销。`)) return
                       await deleteChapter(novelId, ch.id)
+                      queryClient.removeQueries({ queryKey: ['chapter', novelId, ch.id] })
+                      queryClient.removeQueries({ queryKey: ['intel', novelId, ch.id] })
                       queryClient.invalidateQueries({ queryKey: ['chapters', novelId] })
                     }}
                     className="text-red-400 hover:text-red-600 text-xs px-2 py-1 shrink-0"
@@ -603,12 +737,18 @@ export default function NovelDetail() {
           {showNewChar && (
             <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
               <input value={newCharName} onChange={e => setNewCharName(e.target.value)} placeholder="角色名" className="border rounded p-2 text-sm w-full" />
-              <select value={newCharRole} onChange={e => setNewCharRole(e.target.value)} className="border rounded p-2 text-sm">
-                <option value="主角">主角</option>
-                <option value="配角">配角</option>
-                <option value="反派">反派</option>
-                <option value="龙套">龙套</option>
-              </select>
+              <div className="flex gap-2">
+                <select value={newCharGender} onChange={e => setNewCharGender(e.target.value)} className="border rounded p-2 text-sm">
+                  <option value="男">男</option>
+                  <option value="女">女</option>
+                </select>
+                <select value={newCharRole} onChange={e => setNewCharRole(e.target.value)} className="border rounded p-2 text-sm flex-1">
+                  <option value="主角">主角</option>
+                  <option value="配角">配角</option>
+                  <option value="反派">反派</option>
+                  <option value="龙套">龙套</option>
+                </select>
+              </div>
               <input value={newCharIdentity} onChange={e => setNewCharIdentity(e.target.value)} placeholder="身份描述" className="border rounded p-2 text-sm w-full" />
               <div className="flex gap-2">
                 <button onClick={() => addCharMutation.mutate()} className="bg-blue-600 text-white px-4 py-1 rounded text-sm">添加</button>
@@ -628,12 +768,18 @@ export default function NovelDetail() {
                     </div>
                     <div>
                       <label className="text-xs text-gray-500">角色类型</label>
-                      <select value={editChar.role} onChange={e => setEditChar((prev: any) => ({ ...prev, role: e.target.value }))} className="w-full border rounded px-2 py-1 text-sm">
-                        <option value="主角">主角</option>
-                        <option value="配角">配角</option>
-                        <option value="反派">反派</option>
-                        <option value="龙套">龙套</option>
-                      </select>
+                      <div className="flex gap-2">
+                        <select value={editChar.gender} onChange={e => setEditChar((prev: any) => ({ ...prev, gender: e.target.value }))} className="border rounded px-2 py-1 text-sm w-16">
+                          <option value="男">男</option>
+                          <option value="女">女</option>
+                        </select>
+                        <select value={editChar.role} onChange={e => setEditChar((prev: any) => ({ ...prev, role: e.target.value }))} className="border rounded px-2 py-1 text-sm flex-1">
+                          <option value="主角">主角</option>
+                          <option value="配角">配角</option>
+                          <option value="反派">反派</option>
+                          <option value="龙套">龙套</option>
+                        </select>
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs text-gray-500">身份</label>
@@ -698,6 +844,38 @@ export default function NovelDetail() {
                         </div>
                       )}
                     </div>
+                    <div className="border-t pt-2 mt-2">
+                      <button
+                        onClick={() => { setShowCharAiInput(!showCharAiInput); setCharAiPrompt('') }}
+                        disabled={charAiLoading}
+                        className="text-xs text-purple-600 hover:text-purple-800 disabled:opacity-50"
+                      >
+                        {showCharAiInput ? '取消 AI 生成' : 'AI 重新生成'}
+                      </button>
+                      {showCharAiInput && (
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            value={charAiPrompt}
+                            onChange={e => setCharAiPrompt(e.target.value)}
+                            placeholder="修改意见（如：让性格更阴沉、加强战斗能力描述），留空则全面优化"
+                            className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500"
+                            onKeyDown={e => {
+                              if (e.key !== 'Enter' || charAiLoading) return
+                              e.preventDefault()
+                              handleCharAiRegen()
+                            }}
+                            autoFocus
+                          />
+                          <button
+                            onClick={handleCharAiRegen}
+                            disabled={charAiLoading}
+                            className="bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {charAiLoading ? '生成中...' : '生成'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <div className="flex gap-2 pt-1">
                       <button onClick={saveChar} disabled={charSaving} className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50">
                         {charSaving ? '保存中...' : '保存'}
@@ -716,7 +894,7 @@ export default function NovelDetail() {
                           c.role === '主角' ? 'bg-blue-100 text-blue-700' :
                           c.role === '反派' ? 'bg-red-100 text-red-700' :
                           'bg-gray-100 text-gray-700'
-                        }`}>{c.role}</span>
+                        }`}>{c.gender ? `${c.gender}·${c.role}` : c.role}</span>
                       </div>
                     </div>
                     {c.identity && <p className="text-sm text-gray-600 mt-1">{c.identity}</p>}
@@ -803,26 +981,94 @@ export default function NovelDetail() {
               <div key={f.id} className={`bg-white rounded-lg p-4 shadow-sm border-l-4 ${
                 f.status === '已回收' ? 'border-green-500' : f.status === '推进中' ? 'border-yellow-500' : 'border-blue-500'
               }`}>
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="text-sm">{f.description}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {f.foreshadowing_type && (
-                        <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{f.foreshadowing_type}</span>
-                      )}
-                      {f.created_chapter_id && <span className="text-xs text-gray-400">埋设于第{f.created_chapter_id}章</span>}
-                      {f.expected_resolve_start && f.expected_resolve_end && (
-                        <span className="text-xs text-gray-400">预期第{f.expected_resolve_start}-{f.expected_resolve_end}章回收</span>
-                      )}
-                      {f.resolved_chapter_id && <span className="text-xs text-green-600">回收于第{f.resolved_chapter_id}章</span>}
+                {editingFsId === f.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editFsDesc}
+                      onChange={e => setEditFsDesc(e.target.value)}
+                      className="w-full border rounded p-2 text-sm resize-none h-16"
+                    />
+                    <div className="flex gap-3 items-center">
+                      <div>
+                        <label className="text-xs text-gray-500 mr-1">类型:</label>
+                        <select value={editFsType} onChange={e => setEditFsType(e.target.value)} className="border rounded px-2 py-1 text-sm">
+                          <option value="短线">短线</option>
+                          <option value="中线">中线</option>
+                          <option value="长线">长线</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 mr-1">状态:</label>
+                        <select value={editFsStatus} onChange={e => setEditFsStatus(e.target.value)} className="border rounded px-2 py-1 text-sm">
+                          <option value="埋设">埋设</option>
+                          <option value="推进中">推进中</option>
+                          <option value="已回收">已回收</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          await updateForeshadowing(novelId, f.id, {
+                            description: editFsDesc,
+                            foreshadowing_type: editFsType,
+                            status: editFsStatus,
+                          })
+                          queryClient.invalidateQueries({ queryKey: ['foreshadowings', novelId] })
+                          setEditingFsId(null)
+                        }}
+                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm"
+                      >
+                        保存
+                      </button>
+                      <button onClick={() => setEditingFsId(null)} className="text-gray-500 text-sm">取消</button>
                     </div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded ml-2 whitespace-nowrap ${
-                    f.status === '已回收' ? 'bg-green-100 text-green-700' :
-                    f.status === '推进中' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-blue-100 text-blue-700'
-                  }`}>{f.status}</span>
-                </div>
+                ) : (
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="text-sm">{f.description}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        {f.foreshadowing_type && (
+                          <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{f.foreshadowing_type}</span>
+                        )}
+                        {f.created_chapter_id && <span className="text-xs text-gray-400">埋设于第{f.created_chapter_id}章</span>}
+                        {f.expected_resolve_start && f.expected_resolve_end && (
+                          <span className="text-xs text-gray-400">预期第{f.expected_resolve_start}-{f.expected_resolve_end}章回收</span>
+                        )}
+                        {f.resolved_chapter_id && <span className="text-xs text-green-600">回收于第{f.resolved_chapter_id}章</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${
+                        f.status === '已回收' ? 'bg-green-100 text-green-700' :
+                        f.status === '推进中' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>{f.status}</span>
+                      <button
+                        onClick={() => {
+                          setEditingFsId(f.id)
+                          setEditFsDesc(f.description)
+                          setEditFsType(f.foreshadowing_type || '中线')
+                          setEditFsStatus(f.status || '埋设')
+                        }}
+                        className="text-xs text-blue-500 hover:text-blue-700"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('确定删除这条伏笔？')) return
+                          await deleteForeshadowing(novelId, f.id)
+                          queryClient.invalidateQueries({ queryKey: ['foreshadowings', novelId] })
+                        }}
+                        className="text-xs text-red-400 hover:text-red-600"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             {(!foreshadowings || foreshadowings.length === 0) && <p className="text-gray-400 text-center py-8">暂无伏笔记录</p>}
@@ -881,6 +1127,13 @@ export default function NovelDetail() {
         setMeCreating={setMeCreating}
         meCreateResult={meCreateResult}
         setMeCreateResult={setMeCreateResult}
+        meEditingIndex={meEditingIndex}
+        setMeEditingIndex={setMeEditingIndex}
+        meEditForm={meEditForm}
+        setMeEditForm={setMeEditForm}
+        meSaving={meSaving}
+        handleSaveMajorEvent={handleSaveMajorEvent}
+        handleDeleteMajorEvent={handleDeleteMajorEvent}
         queryClient={queryClient}
       />}
     </div>
@@ -1003,7 +1256,7 @@ function MemoriesTab({ novelId, selectedModel, models, setSelectedModel, volSumC
 /* =====================================================
    Task 19: Major Events (大事件) Tab Component
    ===================================================== */
-function MajorEventsTab({ novelId, selectedModel, models, setSelectedModel, majorEventExpanded, setMajorEventExpanded, showMajorEventCreate, setShowMajorEventCreate, meChapterStart, setMeChapterStart, meChapterEnd, setMeChapterEnd, meRangeSummary, setMeRangeSummary, meRangeSummaryLoading, setMeRangeSummaryLoading, meSuggestions, setMeSuggestions, meSuggestionsLoading, setMeSuggestionsLoading, meTitle, setMeTitle, meDescription, setMeDescription, meTargetChapters, setMeTargetChapters, meBuildupStart, setMeBuildupStart, meCreating, setMeCreating, meCreateResult, setMeCreateResult, queryClient }: any) {
+function MajorEventsTab({ novelId, selectedModel, models, setSelectedModel, majorEventExpanded, setMajorEventExpanded, showMajorEventCreate, setShowMajorEventCreate, meChapterStart, setMeChapterStart, meChapterEnd, setMeChapterEnd, meRangeSummary, setMeRangeSummary, meRangeSummaryLoading, setMeRangeSummaryLoading, meSuggestions, setMeSuggestions, meSuggestionsLoading, setMeSuggestionsLoading, meTitle, setMeTitle, meDescription, setMeDescription, meTargetChapters, setMeTargetChapters, meBuildupStart, setMeBuildupStart, meCreating, setMeCreating, meCreateResult, setMeCreateResult, meEditingIndex, setMeEditingIndex, meEditForm, setMeEditForm, meSaving, handleSaveMajorEvent, handleDeleteMajorEvent, queryClient }: any) {
   const { data: majorEvents } = useQuery({
     queryKey: ['majorEvents', novelId],
     queryFn: () => listMajorEvents(novelId).then(r => r.data),
@@ -1209,10 +1462,11 @@ function MajorEventsTab({ novelId, selectedModel, models, setSelectedModel, majo
 
       {/* Events list */}
       <div className="space-y-3">
-        {(majorEvents || []).map((ev: any) => {
-          const isExpanded = majorEventExpanded === ev.id
+        {(majorEvents || []).map((ev: any, idx: number) => {
+          const isExpanded = majorEventExpanded === idx
+          const isEditing = meEditingIndex === idx
           return (
-            <div key={ev.id} className="bg-white rounded-lg p-4 shadow-sm">
+            <div key={idx} className="bg-white rounded-lg p-4 shadow-sm">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
@@ -1221,23 +1475,109 @@ function MajorEventsTab({ novelId, selectedModel, models, setSelectedModel, majo
                       ev.status === '已完成' ? 'bg-green-100 text-green-700' :
                       ev.status === '进行中' ? 'bg-yellow-100 text-yellow-700' :
                       'bg-gray-100 text-gray-700'
-                    }`}>{ev.status || '待执行'}</span>
+                    }`}>{ev.status || '铺垫中'}</span>
                   </div>
                   {ev.chapter_range && <p className="text-xs text-gray-500 mt-0.5">章节范围: {ev.chapter_range}</p>}
-                  {ev.target_chapters && <p className="text-xs text-gray-500 mt-0.5">目标章节: {Array.isArray(ev.target_chapters) ? ev.target_chapters.join(', ') : ev.target_chapters}</p>}
-                  {ev.description && <p className="text-sm text-gray-600 mt-1">{ev.description}</p>}
+                  {ev.buildup_start_chapter && <p className="text-xs text-gray-500 mt-0.5">铺垫起始: 第{ev.buildup_start_chapter}章</p>}
                 </div>
-                <button
-                  onClick={() => setMajorEventExpanded(isExpanded ? null : ev.id)}
-                  className="text-xs text-blue-600 hover:text-blue-800 ml-2 whitespace-nowrap"
-                >
-                  {isExpanded ? '收起' : '详情'}
-                </button>
+                <div className="flex items-center gap-2 ml-2">
+                  <button
+                    onClick={() => { setMeEditingIndex(isEditing ? null : idx); setMeEditForm(isEditing ? null : { ...ev }) }}
+                    className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                  >
+                    {isEditing ? '取消编辑' : '编辑'}
+                  </button>
+                  <button
+                    onClick={() => setMajorEventExpanded(isExpanded ? null : idx)}
+                    className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                  >
+                    {isExpanded ? '收起' : '详情'}
+                  </button>
+                </div>
               </div>
-              {isExpanded && ev.buildup_plan && (
-                <div className="mt-3 bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap">
-                  <p className="text-xs font-medium text-gray-500 mb-1">铺垫计划:</p>
-                  {typeof ev.buildup_plan === 'string' ? ev.buildup_plan : JSON.stringify(ev.buildup_plan, null, 2)}
+
+              {/* Edit form */}
+              {isEditing && meEditForm && (
+                <div className="mt-3 border-t pt-3 space-y-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-0.5">标题</label>
+                    <input value={meEditForm.title || ''} onChange={e => setMeEditForm({ ...meEditForm, title: e.target.value })} className="w-full border rounded px-2 py-1 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-0.5">描述</label>
+                    <textarea value={meEditForm.summary || ''} onChange={e => setMeEditForm({ ...meEditForm, summary: e.target.value })} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={3} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-0.5">章节范围</label>
+                      <input value={meEditForm.chapter_range || ''} onChange={e => setMeEditForm({ ...meEditForm, chapter_range: e.target.value })} className="w-full border rounded px-2 py-1 text-sm" placeholder="如：第50-60章" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-0.5">状态</label>
+                      <select value={meEditForm.status || '铺垫中'} onChange={e => setMeEditForm({ ...meEditForm, status: e.target.value })} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="铺垫中">铺垫中</option>
+                        <option value="进行中">进行中</option>
+                        <option value="已完成">已完成</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-0.5">核心冲突</label>
+                    <textarea value={meEditForm.key_conflicts || ''} onChange={e => setMeEditForm({ ...meEditForm, key_conflicts: e.target.value })} className="w-full border rounded px-2 py-1 text-sm resize-none" rows={2} />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => handleSaveMajorEvent(idx)}
+                      disabled={meSaving}
+                      className="bg-blue-600 text-white px-4 py-1 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {meSaving ? '保存中...' : '保存'}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteMajorEvent(idx)}
+                      disabled={meSaving}
+                      className="text-red-500 hover:text-red-700 px-3 py-1 text-sm disabled:opacity-50"
+                    >
+                      删除此事件
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Expanded details (when not editing) */}
+              {isExpanded && !isEditing && (
+                <div className="mt-3 space-y-2">
+                  {ev.summary && (
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                      <p className="text-xs font-medium text-gray-500 mb-1">事件概要:</p>
+                      {ev.summary}
+                    </div>
+                  )}
+                  {ev.key_conflicts && (
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                      <p className="text-xs font-medium text-gray-500 mb-1">核心冲突:</p>
+                      {ev.key_conflicts}
+                    </div>
+                  )}
+                  {ev.foreshadowing_plan && ev.foreshadowing_plan.length > 0 && (
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-700">
+                      <p className="text-xs font-medium text-gray-500 mb-1">伏笔计划:</p>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {ev.foreshadowing_plan.map((f: any, fi: number) => (
+                          <li key={fi}>{typeof f === 'string' ? f : f.description || JSON.stringify(f)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {ev.buildup_plan && (
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap">
+                      <p className="text-xs font-medium text-gray-500 mb-1">铺垫计划:</p>
+                      {typeof ev.buildup_plan === 'string' ? ev.buildup_plan : JSON.stringify(ev.buildup_plan, null, 2)}
+                    </div>
+                  )}
+                  {!ev.summary && !ev.buildup_plan && !ev.key_conflicts && (
+                    <p className="text-sm text-gray-400 italic">暂无详细信息</p>
+                  )}
                 </div>
               )}
             </div>

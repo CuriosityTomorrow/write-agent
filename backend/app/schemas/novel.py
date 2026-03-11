@@ -75,6 +75,7 @@ class OutlineUpdate(BaseModel):
     story_background: str | None = None
     main_plot: str | None = None
     plot_points: list | None = None
+    raw_outline: str | None = None
 
 
 class OutlineResponse(BaseModel):
@@ -83,6 +84,7 @@ class OutlineResponse(BaseModel):
     story_background: str | None = None
     main_plot: str | None = None
     plot_points: list | None = None
+    raw_outline: str | None = None
 
     model_config = {"from_attributes": True}
 

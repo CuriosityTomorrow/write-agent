@@ -858,13 +858,15 @@ async def check_consistency(chapter_id: int, model_id: str, db: AsyncSession) ->
     outline = outline_result.scalar_one_or_none()
     plot_point = None
     if outline and outline.plot_points:
-        idx = chapter.chapter_number - 1
-        if idx < len(outline.plot_points):
-            pp = outline.plot_points[idx]
-            if isinstance(pp, dict):
-                plot_point = pp.get("summary") or pp.get("title", "")
-            else:
-                plot_point = str(pp)
+        for pp in outline.plot_points:
+            if isinstance(pp, dict) and pp.get("chapter_range"):
+                start, end = _parse_chapter_range(pp["chapter_range"])
+                if start <= chapter.chapter_number <= end:
+                    plot_point = pp.get("summary") or pp.get("title", "")
+                    break
+            elif isinstance(pp, str):
+                plot_point = pp
+                break
 
     # 超期伏笔
     fs_result = await db.execute(

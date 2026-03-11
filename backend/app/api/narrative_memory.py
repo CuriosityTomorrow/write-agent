@@ -72,8 +72,9 @@ async def api_generate_range_summary(
     for ch in chapters:
         intel_result = await db.execute(
             select(ChapterIntel).where(ChapterIntel.chapter_id == ch.id)
+            .order_by(ChapterIntel.id.desc())
         )
-        intel = intel_result.scalar_one_or_none()
+        intel = intel_result.scalars().first()
         if intel:
             intels_parts.append(f"第{ch.chapter_number}章: {intel.plot_summary or ''}")
 

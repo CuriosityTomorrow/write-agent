@@ -9,10 +9,12 @@ AI-assisted Chinese web novel (网文) writing system. FastAPI + React SPA with 
 ## Development Commands
 
 ```bash
-# Backend (from backend/)
+# Backend (from backend/), requires Python 3.11+
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
 # Frontend (from frontend/)
+npm install
 npm run dev          # Vite dev server on :5173, proxies /api → :8000
 npm run build        # tsc -b && vite build
 npm run lint         # eslint .
@@ -24,14 +26,16 @@ docker-compose up mysql -d
 # Tables auto-created on backend startup via SQLAlchemy metadata.create_all
 ```
 
-No test framework configured. No Python linter/formatter configured.
+No test framework configured. No Python linter/formatter configured. `alembic` is in requirements.txt but no migrations directory exists — tables are auto-created via `Base.metadata.create_all` on startup.
+
+**Schema changes:** Since there are no Alembic migrations, adding/modifying model columns requires either manually running `ALTER TABLE` SQL against the database or deleting `write_agent.db` to recreate from scratch (loses all data).
 
 ## Environment Setup
 
-Backend reads `backend/.env` via pydantic-settings. Set whichever providers you need:
+Backend reads `backend/.env` via pydantic-settings. The default `DATABASE_URL` in `config.py` points to MySQL — override it in `.env` for SQLite dev mode (requires `pip install aiosqlite`). Set whichever LLM providers you need:
 
 ```
-DATABASE_URL=sqlite+aiosqlite:///./write_agent.db
+DATABASE_URL=sqlite+aiosqlite:///./write_agent.db   # SQLite dev override (default in config.py is MySQL)
 
 # LLM API Keys (at least one required)
 DEEPSEEK_API_KEY=
@@ -42,6 +46,8 @@ GOOGLE_API_KEY=
 ANTHROPIC_API_KEY=
 ZHIPU_API_KEY=
 DEEPROUTER_API_KEY=
+MINIMAX_API_KEY=
+MINIMAX_GROUP_ID=
 ```
 
 ## Architecture
@@ -57,6 +63,7 @@ DEEPROUTER_API_KEY=
   - `narrative_memory.py` — NarrativeMemory CRUD, volume/range summary generation
   - `major_events.py` — Major event ideas, creation with buildup plans, listing
   - `export.py` — TXT export
+  - `llm_api.py` — Available model listing
 - **`services/writing_engine.py`** — Core orchestrator. Key methods:
   - `generate_idea`, `regenerate_single_field`, `regenerate_novel_field` — Idea/field generation
   - `generate_outline` — Outline + character generation
@@ -68,10 +75,11 @@ DEEPROUTER_API_KEY=
   - `build_pacing_instruction` — Generate pacing constraint text from chapter type + genre preset
 - **`services/memory_system.py`** — `ContextBuilder` assembles novel context with layered priority (P0-P7) for chapter generation. Manages token budget (`max_context * 25%`), truncates from P6 upward when over budget. Includes foreshadowing urgency computation.
 - **`llm/`** — Multi-provider adapter layer. `registry.py` maps provider IDs to provider classes. Three implementations:
-  - `OpenAICompatibleProvider` — DeepSeek/Qwen/GPT/Grok/DeepRouter. Auto-detects reasoning models (4x `max_tokens`).
-  - `ClaudeProvider` — Anthropic Claude + 智谱 GLM-5.
+  - `OpenAICompatibleProvider` — DeepSeek/Qwen/GPT/Grok/DeepRouter (including Gemini Flash proxy). Auto-detects reasoning models (4x `max_tokens`).
+  - `ClaudeProvider` — Anthropic Claude + 智谱 GLM-5 (GLM-5 uses Anthropic-compatible API).
   - `GeminiProvider` — Google Gemini via `google-genai` SDK.
   - All implement `LLMProvider` base class from `base.py`.
+  - CORS hardcoded to `http://localhost:5173` in `main.py` — update if deploying to other origins.
 - **`prompts/`** — Prompt template modules:
   - `idea_generator`, `outline_generator`, `chapter_generator`, `intel_extractor` — Core generation
   - `volume_compressor` — Volume/arc/global compression prompts
@@ -82,11 +90,12 @@ DEEPROUTER_API_KEY=
 
 ### Frontend (`frontend/src/`)
 
-4 pages, React Router, TanStack Query for server state, Tailwind CSS:
+4 pages, React Router, TanStack Query for server state, React `useState` for local component state, Tailwind CSS 4:
 
+- **`NovelList.tsx`** — Home page listing all novels.
 - **`CreateWizard.tsx`** — 6-step novel creation wizard with AI-assisted creative idea generation (prompt-guided).
-- **`NovelDetail.tsx`** — Novel overview with 6 tabs: chapters, outline, characters, foreshadowings, 卷摘要 (volume summaries), 大事件 (major events). Character edit form includes collapsible "角色驱动设定" section.
-- **`ChapterEditor.tsx`** — 3-panel layout: left config (with chapter_type selector), center content editor, right intel sidebar (with character consistency card). SSE streaming.
+- **`NovelDetail.tsx`** — Novel overview with 6 tabs: chapters, outline, characters, foreshadowings, 卷摘要 (volume summaries), 大事件 (major events). Character edit form includes collapsible "角色驱动设定" section + AI regen button. Foreshadowing cards have edit/delete buttons.
+- **`ChapterEditor.tsx`** — 3-panel layout: left config (with chapter_type selector + editable chapter outline), center content editor, right intel sidebar (character consistency card + detected new characters card + suggested foreshadowings with adopt/dismiss). SSE streaming.
 - **`services/api.ts`** — All API calls via axios.
 
 ## Key Design Patterns
@@ -167,6 +176,7 @@ Intel extraction checks character actions against behavior_rules, outputs `chara
 - **`ChapterIntel.timeline_events`**: Array of `{time, event}` objects. Render with type check.
 - **`Character`** domain fields: `golden_finger`, `identity`, `current_status`, `current_location`, `emotional_state`
 - **`ChapterIntel.character_consistency`**: Array of `{name, action, rule_violated, severity, suggestion}` — may be null/empty
+- **`ChapterIntel.detected_new_characters`**: Array of `{name, role, identity, first_appearance_context}` — new characters not in known list
 
 ## Adding a New LLM Provider
 
@@ -182,15 +192,33 @@ For non-OpenAI protocols, implement `LLMProvider` base class.
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| **Novels** | | |
+| GET/POST | /api/novels | List / Create novel |
+| GET/PUT/DELETE | /api/novels/{id} | Read / Update / Delete novel |
+| GET/PUT | /api/novels/{id}/outline | Read / Update outline |
+| GET | /api/novels/{id}/export/txt | Export novel as TXT |
+| **Chapters** | | |
+| GET/POST | /api/novels/{id}/chapters | List / Create chapter |
+| GET/PUT/DELETE | /api/novels/{id}/chapters/{cid} | Read / Update / Delete chapter |
+| GET | /api/novels/{id}/chapters/{cid}/intel | Get chapter intel |
+| **Characters** | | |
+| GET/POST | /api/novels/{id}/characters | List / Create character |
+| PUT/DELETE | /api/novels/{id}/characters/{cid} | Update / Delete character |
+| **Foreshadowings** | | |
+| GET/POST | /api/novels/{id}/foreshadowings | List / Create foreshadowing |
+| PUT/DELETE | /api/novels/{id}/foreshadowings/{fsId} | Update / Delete foreshadowing |
+| POST | /api/novels/{id}/foreshadowings/adopt-suggestion | Adopt AI-suggested foreshadowing |
+| **AI Generation** | | |
 | POST | /api/generate/idea | Generate novel idea template |
 | POST | /api/generate/regenerate-field | Stateless single-field regen |
+| POST | /api/generate/outline-from-prompt | Generate outline from user prompt |
 | POST | /api/novels/{id}/generate/regenerate-field | Stateful single-field regen |
 | POST | /api/novels/{id}/generate/outline | Generate outline + characters |
+| POST | /api/novels/{id}/generate/extract-from-outline | Extract plot points from outline text |
+| POST | /api/novels/{id}/generate/character | AI-generate a character |
 | POST | /api/novels/{id}/chapters/{cid}/generate | Stream chapter (SSE) |
 | POST | /api/novels/{id}/chapters/{cid}/extract-intel | Extract chapter intel |
-| DELETE | /api/novels/{id}/chapters/{cid} | Delete latest chapter |
-| POST | /api/novels/{id}/foreshadowings/adopt-suggestion | Adopt AI-suggested foreshadowing |
-| PUT | /api/novels/{id}/outline | Update outline |
+| **Memory & Events** | | |
 | GET | /api/novels/{id}/narrative-memories | List narrative memories |
 | PUT | /api/novels/{id}/narrative-memories/{mid} | Update narrative memory |
 | POST | /api/novels/{id}/generate/volume-summary | Generate volume summary |
@@ -198,6 +226,6 @@ For non-OpenAI protocols, implement `LLMProvider` base class.
 | GET | /api/novels/{id}/major-events | List major events |
 | POST | /api/novels/{id}/major-events | Create major event with buildup |
 | POST | /api/novels/{id}/major-events/generate-ideas | Generate event ideas |
+| **System** | | |
 | GET | /api/llm/models | List available models |
-| GET | /api/novels/{id}/export/txt | Export novel as TXT |
 | GET | /health | Health check |

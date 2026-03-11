@@ -14,11 +14,11 @@ def build_range_summary_prompt(intels_text: str, chapter_start: int, chapter_end
 {intels_text}
 
 请严格按以下 JSON 格式输出：
-{{{{
+{{
   "summary": "情节摘要",
-  "key_characters": [{{{{"name": "角色名", "status": "当前状态"}}}}],
+  "key_characters": [{{"name": "角色名", "status": "当前状态"}}],
   "active_threads": ["线索1", "线索2"]
-}}}}"""
+}}"""
 
 
 def build_major_event_ideas_prompt(range_summary: str, novel_info: str, current_chapter: int) -> str:
@@ -35,17 +35,17 @@ def build_major_event_ideas_prompt(range_summary: str, novel_info: str, current_
 【当前章节】第{current_chapter}章
 
 请严格按以下 JSON 格式输出：
-{{{{
+{{
   "ideas": [
-    {{{{
+    {{
       "title": "事件标题",
       "description": "事件描述（100-200字）",
       "suggested_chapter_range": "第X-Y章",
       "suggested_buildup_chapters": 30,
       "reasoning": "为什么适合在这个节点引入（50字以内）"
-    }}}}
+    }}
   ]
-}}}}"""
+}}"""
 
 
 def build_buildup_plan_prompt(event_title: str, event_description: str, buildup_start: int, target_start: int, target_end: int, novel_info: str) -> str:
@@ -67,17 +67,17 @@ def build_buildup_plan_prompt(event_title: str, event_description: str, buildup_
 - 应该创建什么伏笔
 
 请严格按以下 JSON 格式输出：
-{{{{
-  "buildup_plan": {{{{
-    "阶段名": {{{{
+{{
+  "buildup_plan": {{
+    "阶段名": {{
       "chapters": "第X-Y章",
       "description": "这个阶段应该做什么",
       "foreshadowings": [
-        {{{{
+        {{
           "description": "伏笔描述",
           "type": "短线/中线/长线"
-        }}}}
+        }}
       ]
-    }}}}
-  }}}}
-}}}}"""
+    }}
+  }}
+}}"""

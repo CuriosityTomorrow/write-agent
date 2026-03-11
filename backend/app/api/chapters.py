@@ -135,6 +135,16 @@ async def update_foreshadowing(novel_id: int, fs_id: int, data: ForeshadowingUpd
     return fs
 
 
+@fs_router.delete("/{fs_id}")
+async def delete_foreshadowing(novel_id: int, fs_id: int, db: AsyncSession = Depends(get_db)):
+    fs = await db.get(Foreshadowing, fs_id)
+    if not fs or fs.novel_id != novel_id:
+        raise HTTPException(404, "Foreshadowing not found")
+    await db.delete(fs)
+    await db.commit()
+    return {"ok": True}
+
+
 class AdoptSuggestionRequest(BaseModel):
     description: str
     foreshadowing_type: str = "中线"

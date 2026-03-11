@@ -93,7 +93,16 @@ def build_intel_prompt(
       "event": "事件描述"
     }}
   ],
-  "next_chapter_required_chars": ["下一章必须出现的角色名1", "角色名2"]{consistency_output}
+  "next_chapter_required_chars": ["下一章必须出现的角色名1", "角色名2"],
+  "detected_new_characters": [
+    {{
+      "name": "新角色名",
+      "gender": "男/女",
+      "role": "龙套/配角/反派",
+      "identity": "根据章节内容推断的身份描述",
+      "first_appearance_context": "该角色在本章做了什么（一句话）"
+    }}
+  ]{consistency_output}
 }}
 
 注意：
@@ -102,4 +111,6 @@ def build_intel_prompt(
 - suggested_foreshadowings 仅在有伏笔被回收时才建议新伏笔，否则留空数组
 - expected_resolve_chapter 填写预估的回收章节号
 - motivation_shift 仅在角色经历重大事件可能导致动机转变时填写
-- character_consistency 仅输出有违反行为准则的角色，全部符合则留空数组"""
+- character_consistency 仅输出有违反行为准则的角色，全部符合则留空数组
+- detected_new_characters 仅输出不在已知角色列表中的新出现人物，路人甲/无名角色不需要输出
+- 新角色的 role 默认填"龙套"，除非从剧情看出是重要配角或反派"""
