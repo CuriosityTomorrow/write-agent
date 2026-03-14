@@ -556,6 +556,7 @@ async def generate_chapter_stream(
     model_id: str,
     db: AsyncSession,
     suggestion: str = "",
+    existing_content: str = "",
 ) -> AsyncGenerator[str, None]:
     """流式生成章节内容"""
     chapter = await db.get(Chapter, chapter_id)
@@ -642,6 +643,7 @@ async def generate_chapter_stream(
         pacing_instruction=pacing_instruction,
         key_events=ctx.get("key_events", ""),
         volume_summaries=ctx.get("volume_summaries", ""),
+        existing_content=existing_content,
     )
     full_content = ""
     async for chunk in provider.generate(
@@ -653,8 +655,9 @@ async def generate_chapter_stream(
         yield chunk
 
     # 生成完毕后更新章节内容
-    chapter.content = full_content
-    chapter.actual_word_count = len(full_content)
+    final_content = existing_content + full_content if existing_content else full_content
+    chapter.content = final_content
+    chapter.actual_word_count = len(final_content)
     chapter.status = "已完成"
     await db.commit()
 

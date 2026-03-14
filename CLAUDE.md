@@ -69,6 +69,7 @@ MINIMAX_GROUP_ID=
   - `generate_outline` — Outline + character generation
   - `generate_chapter_stream` — SSE chapter streaming with pacing control
   - `extract_chapter_intel` — Intel extraction with character consistency checking
+  - `check_consistency` — Post-generation consistency validation (auto-triggered after intel extraction)
   - `generate_volume_summary` — Compress chapter range into volume summary
   - `_maybe_auto_compress` — Auto-trigger compression at chapter milestones (30/150)
   - `assign_chapter_type` — Determine chapter type from major events or 6-chapter cycle
@@ -82,6 +83,7 @@ MINIMAX_GROUP_ID=
   - CORS hardcoded to `http://localhost:5173` in `main.py` — update if deploying to other origins.
 - **`prompts/`** — Prompt template modules:
   - `idea_generator`, `outline_generator`, `chapter_generator`, `intel_extractor` — Core generation
+  - `consistency_checker` — Chapter-vs-settings validation prompts (10 conflict types, 3 severity levels)
   - `volume_compressor` — Volume/arc/global compression prompts
   - `major_event` — Range summary, event ideas, buildup plan prompts
   - `presets/` — Genre-specific configuration: `base.py` (default), `upgrade_fantasy.py` (升级爽文). Loaded via `get_preset(genre)`.
@@ -95,7 +97,7 @@ MINIMAX_GROUP_ID=
 - **`NovelList.tsx`** — Home page listing all novels.
 - **`CreateWizard.tsx`** — 6-step novel creation wizard with AI-assisted creative idea generation (prompt-guided).
 - **`NovelDetail.tsx`** — Novel overview with 6 tabs: chapters, outline, characters, foreshadowings, 卷摘要 (volume summaries), 大事件 (major events). Character edit form includes collapsible "角色驱动设定" section + AI regen button. Foreshadowing cards have edit/delete buttons.
-- **`ChapterEditor.tsx`** — 3-panel layout: left config (with chapter_type selector + editable chapter outline), center content editor, right intel sidebar (character consistency card + detected new characters card + suggested foreshadowings with adopt/dismiss). SSE streaming.
+- **`ChapterEditor.tsx`** — 3-panel layout: left config (with chapter_type selector + editable chapter outline), center content editor, right intel sidebar (character consistency card + detected new characters card + suggested foreshadowings with adopt/dismiss + consistency check section with conflict management). SSE streaming.
 - **`services/api.ts`** — All API calls via axios.
 
 ## Key Design Patterns
@@ -166,6 +168,19 @@ Intel extraction checks character actions against behavior_rules, outputs `chara
 - Auto-recovery: intel extraction matches resolved foreshadowings by ID
 - Suggested foreshadowings: AI suggests new ones, user adopts via UI
 
+### Consistency Check System
+
+LLM-powered validation that compares generated chapter content against established novel settings. Auto-triggered after intel extraction; also available as manual endpoint.
+
+- **Conflict types** (10): `world_setting`, `golden_finger`, `power_system`, `character_personality`, `character_speech`, `character_location`, `character_motivation`, `outline_deviation`, `timeline`, `foreshadowing_overdue`
+- **Severity levels**: `high` (core world/power violations), `medium` (character/outline deviations), `low` (timeline/foreshadowing)
+- **Storage**: `ChapterIntel.consistency_conflicts` JSON field — array of `{type, severity, description, reference, suggestion, related_entity}`
+- **Frontend workflow**: Active conflicts sorted by severity → three actions per conflict:
+  - "Update Setting" — edit & push fix to novel/character settings (→ resolved)
+  - "Chapter Pending" — mark for manual chapter revision (→ pending)
+  - "Dismiss" — ignore (→ dismissed, collapsible)
+- **Prompt module**: `prompts/consistency_checker.py` — assembles novel settings, characters, timeline, overdue foreshadowings as reference context
+
 ### Reasoning Model Handling
 
 `OpenAICompatibleProvider` has `REASONING_MODELS` set. For these models, `max_tokens` is multiplied by 4x because reasoning/thinking tokens count toward the total.
@@ -177,6 +192,7 @@ Intel extraction checks character actions against behavior_rules, outputs `chara
 - **`Character`** domain fields: `golden_finger`, `identity`, `current_status`, `current_location`, `emotional_state`
 - **`ChapterIntel.character_consistency`**: Array of `{name, action, rule_violated, severity, suggestion}` — may be null/empty
 - **`ChapterIntel.detected_new_characters`**: Array of `{name, role, identity, first_appearance_context}` — new characters not in known list
+- **`ChapterIntel.consistency_conflicts`**: Array of `{type, severity, description, reference, suggestion, related_entity}` — may be null/empty
 
 ## Adding a New LLM Provider
 
@@ -218,6 +234,7 @@ For non-OpenAI protocols, implement `LLMProvider` base class.
 | POST | /api/novels/{id}/generate/character | AI-generate a character |
 | POST | /api/novels/{id}/chapters/{cid}/generate | Stream chapter (SSE) |
 | POST | /api/novels/{id}/chapters/{cid}/extract-intel | Extract chapter intel |
+| POST | /api/novels/{id}/chapters/{cid}/check-consistency | Check chapter consistency |
 | **Memory & Events** | | |
 | GET | /api/novels/{id}/narrative-memories | List narrative memories |
 | PUT | /api/novels/{id}/narrative-memories/{mid} | Update narrative memory |

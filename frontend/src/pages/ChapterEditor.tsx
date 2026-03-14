@@ -20,6 +20,7 @@ export default function ChapterEditor() {
   const chapterId = Number(cid)
   const queryClient = useQueryClient()
   const contentRef = useRef<HTMLTextAreaElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const [content, setContent] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -80,15 +81,24 @@ export default function ChapterEditor() {
     }
   }, [chapter])
 
-  const generateChapter = async (suggestion: string = '') => {
+  const generateChapter = async (suggestion: string = '', continueFromExisting: boolean = false) => {
     if (!selectedModel) {
       alert('请先选择 AI 模型')
       return
     }
+
+    const abortController = new AbortController()
+    abortRef.current = abortController
+
     setGenerating(true)
     setShowRegenInput(false)
     setRegenSuggestion('')
-    setContent('')
+
+    const existingContent = continueFromExisting ? content : ''
+    if (!continueFromExisting) {
+      setContent('')
+    }
+
     try {
       const response = await fetch(`/api/novels/${novelId}/chapters/${chapterId}/generate`, {
         method: 'POST',
@@ -97,11 +107,13 @@ export default function ChapterEditor() {
           model_id: selectedModel,
           suggestion,
           chapter_type: chapterType === 'auto' ? undefined : chapterType,
+          existing_content: existingContent || undefined,
         }),
+        signal: abortController.signal,
       })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
-      let fullContent = ''
+      let fullContent = existingContent
       while (reader) {
         const { done, value } = await reader.read()
         if (done) break
@@ -116,16 +128,26 @@ export default function ChapterEditor() {
           }
         }
       }
-      // Auto extract intel
+      // Auto extract intel only if completed (not aborted)
+      setSaved(false)
       setExtracting(true)
       await extractIntel(novelId, chapterId, { model_id: selectedModel })
       refetchIntel()
       setExtracting(false)
       queryClient.invalidateQueries({ queryKey: ['chapter', novelId, chapterId] })
-    } catch (e) {
-      alert('生成失败，请重试')
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        setSaved(false)
+      } else {
+        alert('生成失败，请重试')
+      }
     }
+    abortRef.current = null
     setGenerating(false)
+  }
+
+  const stopGenerating = () => {
+    abortRef.current?.abort()
   }
 
   const handleSave = async () => {
@@ -229,19 +251,36 @@ export default function ChapterEditor() {
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
-          <button
-            onClick={() => {
-              if (content && !generating) {
-                setShowRegenInput(!showRegenInput)
-              } else {
-                generateChapter()
-              }
-            }}
-            disabled={generating}
-            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
-          >
-            {generating ? '生成中...' : content ? '重新生成' : '生成章节'}
-          </button>
+          {generating ? (
+            <button
+              onClick={stopGenerating}
+              className="bg-red-500 text-white px-4 py-1.5 rounded text-sm hover:bg-red-600"
+            >
+              停止生成
+            </button>
+          ) : content ? (
+            <>
+              <button
+                onClick={() => generateChapter('', true)}
+                className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700"
+              >
+                继续生成
+              </button>
+              <button
+                onClick={() => setShowRegenInput(!showRegenInput)}
+                className="bg-gray-500 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-600"
+              >
+                重新生成
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => generateChapter()}
+              className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700"
+            >
+              生成章节
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={saved}
@@ -360,7 +399,6 @@ export default function ChapterEditor() {
             onChange={e => handleContentChange(e.target.value)}
             placeholder="章节内容将在这里显示。点击「生成章节」开始创作..."
             className="w-full h-full min-h-[600px] p-4 text-base leading-relaxed resize-none focus:outline-none bg-white rounded-lg shadow-sm"
-            readOnly={generating}
           />
         </div>
 

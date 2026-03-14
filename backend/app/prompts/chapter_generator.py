@@ -31,6 +31,7 @@ def build_chapter_prompt(
     pacing_instruction: str = "",
     key_events: str = "",
     volume_summaries: str = "",
+    existing_content: str = "",
 ) -> str:
     sections = [
         f"【小说信息】\n{novel_info}",
@@ -56,7 +57,11 @@ def build_chapter_prompt(
         sections.append(f"【节奏控制】\n{pacing_instruction}")
     sections.append(f"【本章要求】\n{chapter_config}")
 
-    if rewrite_content and rewrite_suggestion:
+    if existing_content:
+        # 续写模式
+        sections.append(f"【已写好的内容】\n{existing_content}")
+        sections.append("\n请从上面已写好的内容末尾处继续写作。要求：\n1. 直接续写，不要重复已有内容，不要输出章节标题\n2. 保持与已有内容完全一致的文风、叙事视角、语气\n3. 情节自然衔接，从已有内容最后一个场景/段落继续推进\n4. 不要输出任何解释性文字，直接输出续写的正文内容")
+    elif rewrite_content and rewrite_suggestion:
         sections.append(f"【当前章节内容（需改写）】\n{rewrite_content}")
         sections.append(f"【修改建议】\n{rewrite_suggestion}")
         sections.append("\n请根据修改建议，在当前章节内容的基础上进行改写。保持整体结构和情节走向，按照建议调整相关内容。直接输出改写后的完整章节（包含章节标题），不要输出任何解释性文字。\n\n重要提醒：改写时仍需确保与【前文原文】的连续性——开头必须承接前一章结尾，不可断裂。")

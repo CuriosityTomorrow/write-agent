@@ -60,6 +60,7 @@ class ChapterIntelResponse(BaseModel):
 class GenerateChapterRequest(BaseModel):
     model_id: str = "deepseek"
     suggestion: str = ""
+    existing_content: str = ""
 
 
 class GenerateOutlineRequest(BaseModel):

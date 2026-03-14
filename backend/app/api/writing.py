@@ -145,7 +145,11 @@ async def api_generate_chapter(
     db: AsyncSession = Depends(get_db),
 ):
     async def event_stream():
-        async for chunk in writing_engine.generate_chapter_stream(novel_id, chapter_id, data.model_id, db, suggestion=data.suggestion):
+        async for chunk in writing_engine.generate_chapter_stream(
+            novel_id, chapter_id, data.model_id, db,
+            suggestion=data.suggestion,
+            existing_content=data.existing_content,
+        ):
             yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
