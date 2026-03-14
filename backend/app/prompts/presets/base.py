@@ -8,7 +8,7 @@ BASE_PRESET = {
                 "sub_events": 1,
                 "scene_changes_max": 1,
                 "detail_focus": "世界构建、角色关系、信息铺垫",
-                "hook": "引出悬念或新信息，吸引读者继续",
+                "ending": "自然收束即可，不需要刻意制造悬念",
                 "description": "铺垫章：节奏舒缓，重在细节和氛围营造",
             },
             "transition": {
@@ -16,7 +16,7 @@ BASE_PRESET = {
                 "sub_events": 1,
                 "scene_changes_max": 1,
                 "detail_focus": "冲突升级、紧张感递增、角色互动",
-                "hook": "制造紧迫感，暗示即将到来的高潮",
+                "ending": "可以在紧张处收尾，也可以在一个意外的安静时刻收尾",
                 "description": "递进章：节奏加快，冲突逐步升级",
             },
             "climax": {
@@ -24,7 +24,7 @@ BASE_PRESET = {
                 "sub_events": 1,
                 "scene_changes_max": 2,
                 "detail_focus": "战斗/对决/揭秘的详细过程，角色关键抉择",
-                "hook": "战斗结果或重大转折，引出后续影响",
+                "ending": "跟随事件的自然节奏结束，不要硬加钩子",
                 "description": "高潮章：节奏紧凑，核心冲突爆发",
             },
         },
